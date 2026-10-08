@@ -358,6 +358,10 @@ class McpServer:
         解析capabilities.
         """
         vision = capabilities.get("vision", {})
+        # TrimUI (XIAOZHI_TRIMUI_LITE=1): máy không có camera; nạp camera kéo theo openai
+        # (đã gỡ) → lỗi "No module named 'openai'" mỗi lần server gửi initialize.
+        if __import__("os").environ.get("XIAOZHI_TRIMUI_LITE") == "1":
+            return
         if vision and isinstance(vision, dict):
             url = vision.get("url")
             token = vision.get("token")

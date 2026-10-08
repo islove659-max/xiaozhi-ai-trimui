@@ -81,6 +81,43 @@ from src.logging import get_logger  # noqa: E402
 
 logger = get_logger()
 
+# ---- Chống treo (2026-10-08): vòng asyncio từng kẹt sau khi nhận "stt" → MENU không ăn,
+# máy như đơ phải reset. Ghi vị trí kẹt vào bộ nhớ trong (còn sau reset) để sửa tận gốc.
+import faulthandler  # noqa: E402
+import time  # noqa: E402
+
+HANG_LOG = "/mnt/UDISK/xiaozhi_hang.log"
+HEARTBEAT = "/tmp/xiaozhi_hb"
+try:
+    _hang_fp = open(HANG_LOG, "a", buffering=1)
+    # Người gác trong launch.sh gửi SIGUSR1 khi nhịp tim ngừng → in stack mọi luồng.
+    faulthandler.register(signal.SIGUSR1, file=_hang_fp, all_threads=True)
+except Exception:
+    _hang_fp = None
+
+
+def _force_exit(reason: str) -> None:
+    """Gọi từ luồng phụ khi vòng chính không phản hồi: ghi stack mọi luồng rồi thoát cứng."""
+    try:
+        if _hang_fp:
+            _hang_fp.write(f"\n===== {time.strftime('%F %T')} THOAT CUNG ({reason}) =====\n")
+            faulthandler.dump_traceback(file=_hang_fp, all_threads=True)
+            _hang_fp.flush()
+    finally:
+        os._exit(0)
+
+
+async def _heartbeat() -> None:
+    """Nhịp tim của vòng asyncio — launch.sh theo dõi để biết app còn sống."""
+    while True:
+        try:
+            with open(HEARTBEAT, "w") as f:
+                f.write(str(time.time()))
+        except OSError:
+            pass
+        await asyncio.sleep(2)
+
+
 # Nạp mô-đun Trí tuệ Nhân tạo & Giọng đọc Cục bộ
 LOCAL_AI_DIR = Path(__file__).resolve().parent / "local_ai"
 try:
@@ -314,6 +351,9 @@ def button_reader(loop, container, controller, stop_flag):
                 # Nút MENU: Thoát ứng dụng ở mọi chế độ
                 if code == BTN_MENU:
                     asyncio.run_coroutine_threadsafe(container.event_bus.emit(Events.UI_QUIT_REQUEST), loop)
+                    # Lối thoát cứng: vòng asyncio từng bị kẹt (2026-10-08) → MENU không ăn, máy như đơ.
+                    # Luồng này độc lập: quá 4 giây chưa thoát thì ghi vị trí kẹt rồi buộc thoát.
+                    threading.Timer(4.0, _force_exit, args=("MENU",)).start()
                     continue
 
                 # Nút Y: HOÁN ĐỔI CHẾ ĐỘ (SWAP)
@@ -380,7 +420,9 @@ async def setup_supplement_listeners(container, controller):
         if isinstance(message, dict) and message.get("type") == "stt":
             spoken = message.get("text", "")
             if spoken:
-                controller.check_local_supplement(spoken)
+                # Đọc tài liệu trên thẻ nhớ (thẻ từng lỗi I/O) → làm ở luồng phụ, không chặn vòng chính.
+                loop = asyncio.get_running_loop()
+                loop.run_in_executor(None, controller.check_local_supplement, spoken)
 
     container.event_bus.on(Events.INCOMING_JSON, on_incoming_json)
 
@@ -414,6 +456,7 @@ async def main():
         factory.create_viewport = create_viewport
 
     reader.start()
+    bg_tasks.append(asyncio.create_task(_heartbeat()))
     bg_tasks.append(asyncio.create_task(setup_supplement_listeners(container, controller)))
 
     try:
