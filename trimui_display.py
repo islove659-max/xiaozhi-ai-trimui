@@ -303,8 +303,18 @@ class TrimuiViewManager:
         else:
             heard = "Câu hỏi: " + self.local_question
 
-        while d.textlength(heard, font=self.buttonfont) > w - 64 and len(heard) > 6:
-            heard = heard[:-3] + "..."
+        # Cắt câu dài cho vừa 1 dòng. LỖI CŨ (gây treo máy 2026-10-08): `heard = heard[:-3] + "..."`
+        # bỏ 3 ký tự rồi thêm lại 3 ký tự → độ dài không đổi → vòng lặp vô hạn khi câu nói dài.
+        # Tìm điểm cắt bằng chia đôi: ~9 lần đo chữ thay vì hàng trăm (A53 đo ~7 ms/lần).
+        if d.textlength(heard, font=self.buttonfont) > w - 64:
+            lo, hi = 6, len(heard)
+            while lo < hi:
+                mid = (lo + hi + 1) // 2
+                if d.textlength(heard[:mid].rstrip() + "...", font=self.buttonfont) <= w - 64:
+                    lo = mid
+                else:
+                    hi = mid - 1
+            heard = heard[:lo].rstrip() + "..."
         d.text((32, 188), heard, font=self.buttonfont, fill=(70, 220, 185) if is_server else (255, 185, 65))
 
         # 4. Khung Nội dung Trả lời
