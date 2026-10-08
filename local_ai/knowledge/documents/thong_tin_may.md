@@ -1,7 +1,7 @@
 # Thông tin phần cứng máy TrimUI Brick Pro
 
 - Tên máy: TrimUI Brick Pro (hoặc TrimUI Brick).
-- Vi xử lý: Allwinner A133 (4 nhân ARM Cortex-A53, xung nhịp 1.6 GHz, kiến trúc ARM64 aarch64).
+- Vi xử lý: Allwinner A133plus (A133P), 4 nhân ARM Cortex-A53, xung nhịp 1.8 GHz theo thông số hãng (firmware Stock OS cho phép chạy tới 2.0 GHz), kiến trúc ARM64 aarch64.
 - Bộ nhớ RAM: 1GB LPDDR3.
 - Màn hình: IPS 3.2 inch, độ phân giải 1024 x 768 pixel (tỉ lệ 4:3), sắc nét và màu sắc sống động.
 - Hệ điều hành: Stock OS (nền tảng Tina Linux / OpenWrt, kernel Linux 4.9, thư viện glibc 2.33).
