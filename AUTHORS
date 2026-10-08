@@ -1,0 +1,16 @@
+Xiaozhi AI — Bản TrimUI Hybrid (TrimUI Brick Pro / Stock OS)
+=============================================================
+
+Phát triển & tuỳ biến bản TrimUI Hybrid:
+    islove659@gmail.com
+
+Phần thuộc bản TrimUI Hybrid: trimui_run.py, trimui_display.py, trimui_signature.py,
+local_ai/ (AI cục bộ, tự học, tra cứu Internet, Gemini), launch.sh, set_loa_max.sh,
+và các bản vá cho máy cầm tay trong src/ (âm thanh, hàng đợi TTS, chế độ LITE).
+
+Lõi gốc:
+    py-xiaozhi — Copyright (c) 2025 Junsen (huangjunsen0406), giấy phép MIT.
+    https://github.com/huangjunsen0406/py-xiaozhi
+
+Chữ ký tác giả được hiển thị trên màn chào và được app kiểm tra khi khởi động.
+Không xoá hoặc sửa file này.

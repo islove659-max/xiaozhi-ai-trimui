@@ -1,0 +1,31 @@
+HƯỚNG DẪN THÊM KEY GEMINI CHO AI CỤC BỘ (Xiaozhi AI - chế độ Cục bộ & Web)
+==========================================================================
+
+Gemini dùng để trả lời các câu hỏi vui, câu hỏi tưởng tượng, câu vô nghĩa
+mà Wikipedia không có. Câu hỏi thường vẫn trả lời từ tài liệu máy và Wikipedia.
+
+1. TẠO KEY (miễn phí)
+   - Trên điện thoại hoặc máy tính, vào: https://aistudio.google.com/apikey
+   - Đăng nhập tài khoản Google, bấm "Create API key".
+   - Chép đoạn key (bắt đầu bằng "AIza...").
+
+2. ĐƯA KEY VÀO MÁY
+   - Tạo file văn bản tên đúng là:  gemini_key.txt
+   - Nội dung: chỉ 1 dòng, là đoạn key vừa chép (không thêm gì khác).
+   - Đặt file vào thư mục trên thẻ nhớ:  Apps/XiaozhiAI/local_ai/
+     (cùng thư mục với file hướng dẫn này)
+   - Cách chép: cắm thẻ nhớ vào máy tính, hoặc dùng FileManager/USB.
+
+3. DÙNG THỬ
+   - Mở Xiaozhi AI, bấm Y để chuyển sang chế độ Cục bộ & Web.
+   - Hỏi một câu vui, ví dụ: "nếu chó biết nói thì nó sẽ nói gì".
+   - Trên màn hình, nguồn trả lời sẽ ghi: "Gemini (Google AI)".
+
+LƯU Ý
+   - Key miễn phí có giới hạn số lượt mỗi ngày. Hết lượt thì AI sẽ báo,
+     hôm sau dùng lại được.
+   - Câu hỏi gửi cho Gemini sẽ đi qua máy chủ của Google.
+   - KHÔNG chia sẻ file gemini_key.txt hay ảnh chụp key cho người khác.
+     Khi gửi thẻ nhớ/sao lưu app cho ai đó, hãy xoá file này trước.
+   - Báo "key không hợp lệ": kiểm tra file chỉ có đúng 1 dòng key, không thừa dấu cách.
+   - Không có mạng: AI vẫn trả lời từ tài liệu máy và kiến thức đã học.

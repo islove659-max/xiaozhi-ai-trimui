@@ -1,0 +1,106 @@
+"""
+VL camera implementation using Zhipu AI.
+"""
+
+import base64
+import json
+
+import httpx
+from openai import OpenAI
+
+from src.logging import get_logger
+from src.utils.config_manager import get_config
+
+from .base_camera import BaseCamera
+
+logger = get_logger()
+
+
+class VLCamera(BaseCamera):
+    """
+    智普AI摄像头实现.
+    """
+
+    def __init__(self):
+        """
+        初始化智普AI摄像头.
+        """
+        super().__init__()
+        config = get_config()
+
+        # 初始化OpenAI客户端（设置超时防止 API 无响应时线程池挂起）
+        self.client = OpenAI(
+            api_key=config.get_config("CAMERA.VLapi_key"),
+            base_url=config.get_config(
+                "CAMERA.Local_VL_url",
+                "https://open.bigmodel.cn/api/paas/v4/chat/completions",
+            ),
+            timeout=httpx.Timeout(30.0, connect=10.0),
+        )
+        self.model = config.get_config("CAMERA.models", "glm-4v-plus")
+        logger.info(f"VL Camera initialized with model: {self.model}")
+
+    def capture(self) -> bool:
+        """
+        捕获图像（OpenCV/V4L2 或 picamera2，见 capture_backend）.
+        """
+        return self.capture_frame()
+
+    def analyze(self, question: str, image_data: bytes | None = None) -> str:
+        try:
+            buf = image_data if image_data is not None else self.jpeg_data["buf"]
+            if not buf:
+                return json.dumps(
+                    {"success": False, "message": "Camera buffer is empty"}
+                )
+
+            # 将图像转换为Base64
+            image_base64 = base64.b64encode(buf).decode("utf-8")
+
+            # 准备消息
+            messages = [
+                {"role": "system", "content": "You are a helpful assistant."},
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:image/jpeg;base64,{image_base64}"
+                            },
+                        },
+                        {
+                            "type": "text",
+                            "text": (
+                                question
+                                if question
+                                else "图中描绘的是什么景象？请详细描述。"
+                            ),
+                        },
+                    ],
+                },
+            ]
+
+            # 发送请求
+            completion = self.client.chat.completions.create(
+                model=self.model,
+                messages=messages,
+                modalities=["text"],
+                stream=True,
+                stream_options={"include_usage": True},
+            )
+
+            # 收集响应
+            result = ""
+            for chunk in completion:
+                if chunk.choices:
+                    result += chunk.choices[0].delta.content or ""
+
+            # 记录响应
+            logger.info(f"VL analysis completed, question={question}")
+            return json.dumps({"success": True, "text": result}, ensure_ascii=False)
+
+        except Exception as e:
+            error_msg = f"Failed to analyze image with VL: {e}"
+            logger.error(error_msg, exc_info=True)
+            return json.dumps({"success": False, "message": error_msg})

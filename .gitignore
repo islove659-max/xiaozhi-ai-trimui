@@ -1,0 +1,14 @@
+# Bí mật / dữ liệu riêng — KHÔNG BAO GIỜ đưa lên
+local_ai/gemini_key.txt
+local_ai/knowledge/user_stats.json
+local_ai/knowledge/documents/kien_thuc_da_hoc.md
+local_ai/audio_cache/
+
+# Thư viện đã cài trên máy (cài lại bằng requirements-trimui.txt)
+pylibs/
+
+# Rác
+__pycache__/
+*.pyc
+*.bak*
+*.tmp
