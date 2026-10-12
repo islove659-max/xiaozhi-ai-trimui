@@ -136,6 +136,9 @@ except Exception as e:
 EV_FMT = "<qqHHi"
 EV_SIZE = struct.calcsize(EV_FMT)
 EV_KEY = 1
+EV_ABS = 3
+# D-pad của "TRIMUI Player1" là trục HAT (EV_ABS 16/17, giá trị -1/0/1), không phải phím 103/108/105/106
+HAT_TO_KEY = {(16, -1): 105, (16, 1): 106, (17, -1): 103, (17, 1): 108}
 
 BTN_A = 305
 BTN_B = 304
@@ -352,9 +355,14 @@ def button_reader(loop, container, controller, stop_flag):
         return
 
     pending = bytearray()
+    held, next_repeat = None, 0.0   # D-pad đang giữ (tự lặp để cuộn ở tab Cài gói game)
     try:
         while not stop_flag["stop"]:
-            ready, _, _ = select.select([fd], [], [], 0.2)
+            ready, _, _ = select.select([fd], [], [], 0.05 if held else 0.2)
+            if held and time.monotonic() >= next_repeat:
+                next_repeat = time.monotonic() + 0.12
+                if controller.authorized and controller.packages.active:
+                    controller.package_future = asyncio.run_coroutine_threadsafe(controller.packages.handle(held, repeat=True), loop)
             if not ready:
                 continue
             try:
@@ -368,6 +376,13 @@ def button_reader(loop, container, controller, stop_flag):
                 record = pending[:EV_SIZE]
                 del pending[:EV_SIZE]
                 _, _, etype, code, value = struct.unpack(EV_FMT, record)
+                if etype == EV_ABS and code in (16, 17):
+                    if value == 0:
+                        held = None
+                        continue
+                    code = HAT_TO_KEY[(code, 1 if value > 0 else -1)]
+                    etype, value = EV_KEY, 1
+                    held, next_repeat = code, time.monotonic() + 0.4
                 if etype != EV_KEY:
                     continue
                 # Giữ D-pad (value 2) chỉ dùng để cuộn danh sách ở tab Cài gói game

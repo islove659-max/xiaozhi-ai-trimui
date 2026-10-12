@@ -4,17 +4,20 @@ L1/R1 chuyển giữa tab "Trợ lý AI" và tab này (SELECT là phím hệ th�
 Gemini (Y) chỉ phân tích và đề xuất; mọi thao tác ghi thẻ vẫn do game_packages kiểm tra.
 """
 import asyncio
+import logging
 import re
 import threading
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont
-from game_packages import preview, install, remove_source
+from game_packages import preview, install, remove_source, system_label
 
 KIND_LABEL = {'rom': 'ROM', 'rooted': 'Gói sắp sẵn theo thư mục thẻ', 'portmaster': 'Port PortMaster',
               'port_data': 'Dữ liệu game cho port đã cài'}
 BG, CARD, CARD_SEL = (16, 22, 34), (26, 38, 54), (38, 62, 84)
 ACCENT, WARN, MUTED, ERR = (70, 220, 185), (255, 185, 65), (175, 190, 210), (255, 110, 110)
 _fonts = {}
+logger = logging.getLogger('trimui_packages')
 
 
 def _font(size):
@@ -167,8 +170,16 @@ class PackageUI:
         self.installed_source = None
         self.system_index = 0
         self.advice_back = 'list'
+        self.manual_plan = None   # danh sách chọn tay khi app/AI chưa nhận ra gói
+        self.ai_choice = None
+        # Luồng riêng: executor mặc định của asyncio hay bị các tác vụ âm thanh của app chiếm
+        self.pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix='packages')
+
+    async def run(self, fn, *args):
+        return await asyncio.get_running_loop().run_in_executor(self.pool, fn, *args)
 
     async def show(self, state):
+        logger.info('[packages] %s (page=%s)', state.get('status'), self.page)
         self.state = state
         await self.bus.emit('trimui_packages', self.state)
 
@@ -219,29 +230,52 @@ class PackageUI:
         self.busy = True
         try:
             await self.show({'status': 'Đang đọc gói...', 'lines': [self.entries[self.index].name], 'controls': []})
-            self.plan = await asyncio.to_thread(preview, self.entries[self.index], self.root, system)
+            entry = self.entries[self.index]
+            self.plan = await self.run(preview, entry, self.root, system)
+            self.ai_choice = None
             if self.plan.get('needs_system'):
-                self.page = 'systems'
-                self.system_index = 0
-                await self.system_page()
-                return
+                # App chưa tự nhận ra: nhờ AI chọn trong các nơi cài hợp lệ, người mới không phải tự chọn
+                self.manual_plan = self.plan
+                await self.show({'status': 'AI đang nhận diện gói...', 'lines': [entry.name,
+                                 'App chưa tự nhận ra gói này, đang nhờ AI xem tên và loại file để chọn đúng chỗ cài.'], 'controls': []})
+                why = ''
+                try:
+                    from game_package_ai import suggest_target
+                    choice, why = await self.run(suggest_target, entry, self.plan['systems'], self.plan.get('labels', {}), self.root)
+                except Exception as exc:
+                    choice, why = None, str(exc)
+                if not choice:
+                    self.page = 'systems'
+                    self.system_index = 0
+                    self.plan['reason'] = 'AI cũng chưa chắc: ' + why if why else self.plan['reason']
+                    await self.system_page()
+                    return
+                self.plan = await self.run(preview, entry, self.root, choice)
+                self.ai_choice = (self.manual_plan.get('labels', {}).get(choice, choice), why)
             self.page = 'preview'
             plan = self.plan
+            kind_text = KIND_LABEL.get(plan['kind'], plan['kind'])
+            if plan['kind'] == 'rom' and plan.get('system'):
+                kind_text = 'ROM ' + system_label(plan['system'])
             table = [('Gói', Path(plan['source']).name),
-                     ('Loại', KIND_LABEL.get(plan['kind'], plan['kind']) + (' — ' + plan['title'] if plan.get('title') else '')),
+                     ('Loại', kind_text + (' — ' + plan['title'] if plan.get('title') else '')),
                      ('Nhận diện', plan['certainty']),
                      ('Cài vào', '/' + (plan.get('target_dir') or '')),
                      ('Dung lượng', '%s  (%d file)' % (_size(plan['bytes']), len(plan['items']) + len(plan['repairs'])))]
             lines = list(plan.get('notes', []))
+            if self.ai_choice:
+                table[2] = ('Nhận diện', 'AI chọn: ' + self.ai_choice[0])
+                lines.insert(0, 'Lý do: ' + self.ai_choice[1])
             if plan['repairs']:
                 lines.append('Cần bổ sung theo khai báo của gói:')
                 lines.extend(('Tải HTTPS: ' if 'url' in x else 'Tạo file: ') + x['target'] for x in plan['repairs'])
             if plan['kind'] == 'portmaster':
                 lines.append('Sau khi chép: mở app PortMaster, port sẽ tự cài (cần Wi-Fi nếu thiếu runtime).')
             lines.append('Không ghi đè file có sẵn. Chỉ chép file, không tự chạy game.')
-            await self.show({'status': 'Xem trước — chưa cài', 'table': table, 'lines': lines,
-                             'controls': [('A', 'Tải/tạo bổ sung và cài' if plan['repairs'] else 'Cài'),
-                                          ('Y', 'Hỏi AI'), ('B', 'Quay lại')]})
+            controls = [('A', 'Tải/tạo bổ sung và cài' if plan['repairs'] else 'Cài'), ('Y', 'Hỏi AI thêm'), ('B', 'Quay lại')]
+            if self.ai_choice:
+                controls.insert(2, ('X', 'Chọn nơi khác'))
+            await self.show({'status': 'Xem trước — chưa cài', 'table': table, 'lines': lines, 'controls': controls})
         except Exception as exc:
             self.plan = None
             self.page = 'blocked'
@@ -254,7 +288,7 @@ class PackageUI:
     async def system_page(self):
         labels = self.plan.get('labels', {})
         choices = self.plan['systems']
-        await self.show({'status': 'Chưa rõ hệ máy / game — chọn nơi cài', 'tone': 'warn',
+        await self.show({'status': 'Gói này là game của máy nào?', 'tone': 'warn',
                          'rows': [('PORT' if c.startswith('port:') else 'HỆ', labels.get(c, c).removeprefix('PORT: '), '')
                                   for c in choices],
                          'selected': self.system_index, 'hint': self.plan['reason'],
@@ -280,7 +314,7 @@ class PackageUI:
                 asyncio.run_coroutine_threadsafe(self.show(state), loop)
 
             kind, source = self.plan['kind'], self.plan['source']
-            result = await asyncio.to_thread(install, self.plan, self.cancel, progress, True)
+            result = await self.run(install, self.plan, self.cancel, progress, True)
             self.installed_source = source
             tail = {'portmaster': 'Mở app PortMaster để hoàn tất cài port.',
                     'port_data': 'Mở game trong mục Ports. Lần đầu port có thể mất vài phút xử lý dữ liệu.'}.get(
@@ -307,7 +341,7 @@ class PackageUI:
         source = self.installed_source
         self.installed_source = None
         try:
-            await asyncio.to_thread(remove_source, source, self.root)
+            await self.run(remove_source, source, self.root)
             await self.show({'status': 'Đã xoá gói gốc', 'lines': [Path(source).name], 'controls': [('B', 'Danh sách gói')]})
         except Exception as exc:
             await self.show({'status': 'Không xoá được gói gốc', 'tone': 'error', 'lines': [str(exc)],
@@ -325,7 +359,7 @@ class PackageUI:
                 self.entries[self.index].name,
                 'Chỉ gửi tên file, kích thước và vài file cấu hình nhỏ — không gửi ROM, dữ liệu game hay key.'],
                 'controls': []})
-            result = await asyncio.to_thread(analyze, self.entries[self.index], self.root)
+            result = await self.run(analyze, self.entries[self.index], self.root)
             lines = ['Đã đối chiếu trên máy: ' + (', '.join(result['verified_missing']) or 'chưa xác định chắc chắn file nào thiếu.'),
                      'AI đề xuất (chưa xác minh):', result['summary']]
             lines += ['• ' + s for s in result['suggestions']]
@@ -344,6 +378,8 @@ class PackageUI:
 
     # ---------- phím ----------
     async def handle(self, code, repeat=False):
+        if not repeat:
+            logger.info('[packages] phim %s (page=%s busy=%s)', code, self.page, self.busy)
         if self.busy:
             if code in (304, 316) and self.page == 'install':   # B / MENU: hủy, cài đặt tự hoàn tác
                 self.cancel.set()
@@ -382,6 +418,11 @@ class PackageUI:
         elif code == 308:   # X
             if self.page == 'list':
                 await self.open()
+            elif self.page == 'preview' and self.ai_choice and self.manual_plan:
+                self.plan = self.manual_plan
+                self.page = 'systems'
+                self.system_index = 0
+                await self.system_page()
             elif self.page == 'result':
                 await self.remove_installed()
         elif code == 307:   # Y

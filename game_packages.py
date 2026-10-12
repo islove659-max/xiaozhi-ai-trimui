@@ -27,6 +27,21 @@ MAX_FILES = 20000
 MANIFEST = 'xiaozhi-game.json'
 INFER = {'.gba':'GBA','.agb':'GBA','.gb':'GB','.gbc':'GBC','.nes':'FC',
          '.sfc':'SFC','.smc':'SFC','.nds':'NDS','.cso':'PSP','.p8':'PICO8','.p8.png':'PICO8'}
+# Tên dễ hiểu cho người mới (thư mục Roms/<HỆ> của TrimUI Stock)
+SYSTEM_NAMES = {'ARCADE':'Arcade','ATARI2600':'Atari 2600','ATARI7800':'Atari 7800','CPS1':'Capcom CPS1','CPS2':'Capcom CPS2',
+    'CPS3':'Capcom CPS3','DC':'Sega Dreamcast','EASYRPG':'RPG Maker 2000/2003','FBNEO':'Arcade FinalBurn Neo','FC':'NES / Famicom',
+    'FFMPEG':'Video','GB':'Game Boy','GBA':'Game Boy Advance','GBC':'Game Boy Color','GG':'Sega Game Gear','GW':'Game & Watch',
+    'LYNX':'Atari Lynx','MAME':'Arcade MAME','MAME2003PLUS':'Arcade MAME 2003+','MAME2010':'Arcade MAME 2010','MD':'Sega Mega Drive / Genesis',
+    'MS':'Sega Master System','N64':'Nintendo 64','NDS':'Nintendo DS','NEOGEO':'Neo Geo','NGP':'Neo Geo Pocket','OPENBOR':'OpenBOR',
+    'PCE':'PC Engine / TurboGrafx','PGM':'Arcade PGM','PICO8':'PICO-8','PS':'PlayStation 1','PSP':'PlayStation Portable',
+    'SFC':'SNES / Super Famicom','SS':'Sega Saturn','WS':'WonderSwan','WSC':'WonderSwan Color','JAVA':'Java (J2ME)'}
+
+
+def system_label(code):
+    name=SYSTEM_NAMES.get(code)
+    return name+' ('+code+')' if name else code
+
+
 ARCHIVE_ROM_SYSTEMS = {'ARCADE','CPS1','CPS2','CPS3','FBNEO','MAME','MAME2003PLUS','MAME2010','NEOGEO','PGM'}
 PORTS_DIR = 'Data/ports'
 AUTOINSTALL_DIR = 'Data/ports/autoinstall'
@@ -254,7 +269,7 @@ def _portmaster_dir(files):
     return None
 
 
-def _match_port(files,ports,label=''):
+def _match_port(files,ports,label='',name_only=False):
     """Chọn port có nhiều tên file trùng với script của nó nhất. Trả (dir, prefix, số file khớp, có trùng tên không) hoặc None.
     prefix = lớp thư mục bọc ngoài của gói cần bỏ (ví dụ 'Celeste Linux/').
     Tên gói/thư mục gốc trùng tên port được cộng điểm, để game dùng tên file chung (GameMaker data.win...)
@@ -271,7 +286,15 @@ def _match_port(files,ports,label=''):
         named=any(k in l or (len(l)>=4 and l in k) for k in keys for l in labels)
         score=len(strong)+(2 if named and hits else 0)
         if score:scores.append((score,directory,hits))
-    if not scores:return None
+    if not scores:
+        if not name_only:return None
+        # Không port nào có file khớp script (port cài tay/thiếu script): chỉ nhận khi đúng 1 port trùng tên gói
+        named_only=[d for d,info in ports.items()
+                    if any(k in l or (len(l)>=4 and l in k) for k in {k for k in (_norm(d),_norm(info['title'])) if len(k)>=4} for l in labels)]
+        if len(named_only)!=1:return None
+        tops={e.name.split('/')[0] for e in files}
+        prefix=tops.pop()+'/' if len(tops)==1 and all('/' in e.name for e in files) else ''
+        return named_only[0],prefix,0,True
     scores.sort(reverse=True)
     if len(scores)>1 and scores[1][0]==scores[0][0]:return None   # hai port ngang điểm: để người dùng chọn
     score,directory,hits=scores[0];named=score>len([n for n in hits if not WEAK.match(n)])
@@ -334,12 +357,26 @@ def preview(path,root=Path('/mnt/SDCARD'),system=None,sevenzip=None):
                 candidates={INFER.get('.p8.png' if e.name.lower().endswith('.p8.png') else Path(e.name).suffix.lower()) for e in files}
                 candidates.discard(None)
                 if len(candidates)==1:system=candidates.pop()
-            if system not in available:
+            if not system:
+                # Đuôi file chỉ một emulator trên thẻ nhận (theo extlist của Emus/*/config.json)
+                exts={Path(e.name).suffix.lower().lstrip('.') for e in files}-{'zip','7z','txt','md','pdf','jpg','png','nfo','url','ini','cfg','json','xml'}
+                if exts:
+                    owners={k for k,v in available.items() if k!='PORTS' and exts<=v}
+                    if len(owners)==1:system=owners.pop()
+            if not system:
+                # Không phải ROM nhận ra được: thử khớp port theo tên gói (port không có script để đối chiếu)
+                match=_match_port(files,ports,pkg.path.name,name_only=True)
+                if match:
+                    port_dir,prefix,count,named=match;info=ports[port_dir]
+                    kind='port_data';title=info['title'];items=_port_data_items(files,port_dir,prefix,info)
+                    certainty='Tên gói trùng tên game đã cài: '+title
+            if kind=='rom' and system not in available:
                 choices=sorted(k for k in available if k!='PORTS')+['port:'+d for d in sorted(ports)]
                 return {'source':str(pkg.path),'needs_system':True,'systems':choices,
-                        'labels':{**{k:k for k in available},**{'port:'+d:'PORT: '+ports[d]['title'] for d in ports}},
-                        'reason':'Gói chưa rõ hệ máy hoặc game. Chọn hệ máy/port trước khi xem nơi cài.'}
-            if system in ARCHIVE_ROM_SYSTEMS:
+                        'labels':{**{k:system_label(k) for k in available},**{'port:'+d:'PORT: '+ports[d]['title'] for d in ports}},
+                        'reason':'App chưa nhận ra gói này thuộc máy/game nào.'}
+            if kind!='rom':pass
+            elif system in ARCHIVE_ROM_SYSTEMS:
                 if pkg.kind!='zip':raise ValueError('ROM Arcade cần ZIP gốc của ROM set; không tự chuyển 7z/thư mục thành ROM set.')
                 items=[{'source':None,'target':'Roms/'+system+'/'+pkg.path.name,'size':pkg.path.stat().st_size,'copy_archive':True}]
             else:

@@ -158,7 +158,7 @@ class TrimuiViewManager:
         self.bus.on("trimui_mode_change", self.on_mode_change)
         self.bus.on("trimui_local_update", self.on_local_update)
 
-    async def on_packages(self, state):
+    async def on_packages(self, state=None):  # EventBus gọi không tham số khi dữ liệu là None (rời tab)
         self.package_state = state
         self.dirty = True
         self._canvas = None

@@ -144,6 +144,24 @@ try:
  check('shared GameMaker names without name match ask user',plan.get('needs_system'))
  plan=gp.preview(archive('pvz.zip',{'PvZ ND/data.win':b'w'}),root,'port:pvznd')
  check('port without gamedata folder receives files at port root',[i['target'] for i in plan['items']]==['Data/ports/pvznd/data.win'])
+ # Port cài tay, không có script để đối chiếu: nhận theo tên gói; gói ROM trùng tên port vẫn vào ROM
+ d=root/'Data/ports/estigma';(d/'gamedata').mkdir(parents=True)
+ (d/'port.json').write_text(json.dumps({'items':['Estigma.sh','estigma/'],'attr':{'title':'Estigma'}}))
+ plan=gp.preview(folder('Thu du lieu Estigma',{'Estigma/assets/a.bin':b'a'}),root)
+ check('port without script matched by package name',plan['kind']=='port_data' and [i['target'] for i in plan['items']]==['Data/ports/estigma/gamedata/assets/a.bin'])
+ plan=gp.preview(archive('Celeste Classic.zip',{'Celeste Classic.gba':b'c'}),root)
+ check('ROM named like a port still goes to ROM folder',plan['kind']=='rom' and plan['items'][0]['target']=='Roms/GBA/Celeste Classic.gba')
+ (root/'Roms/MD').mkdir();(root/'Emus/MD').mkdir();(root/'Emus/MD/config.json').write_text(json.dumps({'rompath':'../../Roms/MD','extlist':'md|gen|smd|zip'}))
+ plan=gp.preview(archive('sonic.zip',{'Sonic.gen':b's'}),root)
+ check('system inferred from emulator extlist on card',plan.get('system')=='MD' and plan['items'][0]['target']=='Roms/MD/Sonic.gen')
+ import game_package_ai as gpa
+ p=archive('ai-pick.zip',{'mystery.bin':b'm'});plan=gp.preview(p,root)
+ with patch.object(gpa,'_gemini_json',lambda prompt:{'choice':'System/bin','confidence':'cao','reason':'x'}):
+  check('AI choice outside allowed list rejected',gpa.suggest_target(p,plan['systems'],plan['labels'],root)[0] is None)
+ with patch.object(gpa,'_gemini_json',lambda prompt:{'choice':'GBA','confidence':'thap','reason':'x'}):
+  check('AI low-confidence choice not used',gpa.suggest_target(p,plan['systems'],plan['labels'],root)[0] is None)
+ with patch.object(gpa,'_gemini_json',lambda prompt:{'choice':'port:estigma','confidence':'cao','reason':'ten file'}):
+  check('AI valid choice accepted',gpa.suggest_target(p,plan['systems'],plan['labels'],root)==('port:estigma','ten file'))
  plan=gp.preview(archive('forced.zip',{'Pack/Other.exe':b'o','Pack/data/x.bin':b'x'}),root,'port:fnagame')
  check('manual port choice strips common folder',sorted(i['target'] for i in plan['items'])==['Data/ports/fnagame/gamedata/Other.exe','Data/ports/fnagame/gamedata/data/x.bin'])
  # ---------- 7z thật ----------
