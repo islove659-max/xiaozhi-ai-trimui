@@ -8,7 +8,8 @@ Mới: tab **Cài gói game** — AI tự nhận diện và cài game vào đún
 - Tự nhận diện ROM theo giả lập có trên thẻ (kể cả N64/NDS/PSP… không khai báo đuôi file), dữ liệu game của port theo script của port, gói port PortMaster. Gói chưa nhận ra thì AI (Gemini, key riêng của bạn) chọn nơi cài trong danh sách hợp lệ; AI có kèm hướng dẫn cài game của máy.
 - Port PortMaster được cài thẳng vào Data/ports và thêm vào menu Ports; runtime tải qua PortMaster khi có Wi-Fi. Gói dữ liệu game mà port chưa cài thì app tự cài port trước.
 - Cài ROM xong tự làm mới danh sách game của MainUI.
-- An toàn: không ghi đè file khác nội dung, cài qua thư mục tạm và tự hoàn tác khi lỗi/hủy, không tự chạy game, không gửi ROM/dữ liệu game/key cho AI.
+- An toàn: không ghi đè file khác nội dung, cài qua thư mục tạm và tự hoàn tác khi lỗi/hủy, không tự chạy game, dữ liệu gửi cho AI được giới hạn (xem bên dưới).
+- Dữ liệu gửi cho AI (Gemini, chỉ khi bạn dùng tính năng AI và có key riêng): **có gửi** tên gói, tên và dung lượng file bên trong (tối đa 300 file), vài file chữ nhỏ dưới 8KB (readme/.json/.ini/.cfg, tối đa 6 file, đã lọc dòng có key/token/password), danh sách hệ máy và port trên thẻ; **không gửi** nội dung ROM hay dữ liệu game, key Gemini trong câu hỏi, tài khoản Xiaozhi. Không có key hoặc mạng thì AI không chạy, app vẫn tự cài các gói nhận ra được.
 - Gồm bản sửa kích hoạt tài khoản của v1.0.3 (chưa phát hành riêng).
 
 Kiểm thử: 66 + 14 điều kiện tự động; trên Brick Pro thật đã cài 8 gói (ROM zip/7z/thư mục/file lẻ, port Unwin, port The Last Game + dữ liệu Steam), MD5 khớp bản gốc, mở chơi được.
