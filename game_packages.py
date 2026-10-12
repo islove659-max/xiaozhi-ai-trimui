@@ -558,8 +558,13 @@ def preview(path,root=Path('/mnt/SDCARD'),system=None,sevenzip=None):
     for x in list(allitems):
         d=destination(root,x['target'])
         if not d.exists():continue
-        if x.get('source') and d.is_file() and d.stat().st_size==x['size'] and kind in ('port_data','rooted','portmaster','rom'):
-            items.remove(x);skipped+=1;continue
+        same=False
+        if x.get('source') and d.is_file() and d.stat().st_size==x['size'] and kind in ('port_data','rooted','portmaster','rom'):same=True
+        elif 'data' in x and d.is_file():
+            # File app tự tạo: giống hệt thì bỏ qua; mục menu port đã có thì giữ nguyên (có thể người dùng đã chỉnh)
+            same=d.read_bytes()==x['data'] or (kind=='portmaster' and x['target'].startswith('Ports/portmaster-'))
+        if same:
+            (items if x in items else repairs).remove(x);skipped+=1;continue
         conflicts.append(x['target'])
     if conflicts:
         raise ValueError('Đã có %d file khác nội dung, không ghi đè: %s'%(len(conflicts),', '.join(conflicts[:3])))

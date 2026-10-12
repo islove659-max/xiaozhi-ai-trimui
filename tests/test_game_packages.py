@@ -130,6 +130,10 @@ try:
  gp.install(plan)
  conf=json.loads((root/'Ports/portmaster-demo2/config.json').read_text(encoding='utf-8'))
  check('TOS card gets Ports/portmaster-* menu entry',conf['launch']=='/mnt/SDCARD/Data/ports/Demo2.sh' and conf['label']=='Demo Game' and (root/'Ports/portmaster-demo2/icon.png').read_bytes()==b'png')
+ (root/'Ports/portmaster-demo2/config.json').write_text('{"label":"Ten nguoi dung tu dat"}')
+ rejects('reinstalling an installed port is "already there", user menu kept',
+  lambda:gp.preview(base/'Demo2',root),'đã có sẵn')
+ check('user-edited menu entry untouched','Ten nguoi dung' in (root/'Ports/portmaster-demo2/config.json').read_text())
  (root/'Emus/PORTS/config.off').rename(root/'Emus/PORTS/config.json')
  (root/'Roms/GB/GB_cache7.db').write_bytes(b'db')
  check('game list cache refreshed after ROM install',gp.refresh_game_list(['Roms/GB/x.gb'],root)==['GB'] and (root/'Roms/GB/GB_cache7.db.old').exists())
