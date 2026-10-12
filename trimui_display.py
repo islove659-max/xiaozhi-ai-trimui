@@ -129,6 +129,7 @@ class TrimuiViewManager:
             self._show_tamper_and_exit()
         self.running = False
         self.auth_state = None
+        self.package_state = None
         self.status, self.connected, self.text = "Sẵn sàng — bấm A để nói", False, ""
         self.auto, self.emotion, self.music, self.last_button = False, "neutral", "", ""
         self.mic = {"enabled": False, "rms": 0.0, "peak": 0.0, "clipped": False, "overflows": 0}
@@ -149,12 +150,18 @@ class TrimuiViewManager:
         self.buttonfont = ImageFont.truetype(font_path, 22)
         self.badgefont = ImageFont.truetype(font_path, 24)
 
+        self.bus.on("trimui_packages", self.on_packages)
         self.bus.on("trimui_auth_status", self.on_auth_status)
         self.bus.on("trimui_button", self.on_button)
         self.bus.on("trimui_mic", self.on_mic)
         self.bus.on("incoming_json", self.on_message)
         self.bus.on("trimui_mode_change", self.on_mode_change)
         self.bus.on("trimui_local_update", self.on_local_update)
+
+    async def on_packages(self, state):
+        self.package_state = state
+        self.dirty = True
+        self._canvas = None
 
     async def on_auth_status(self, state):
         self.auth_state = None if state.get("ready") else state
@@ -265,6 +272,7 @@ class TrimuiViewManager:
 
     async def close(self):
         self.running = False
+        self.bus.off("trimui_packages", self.on_packages)
         self.bus.off("trimui_auth_status", self.on_auth_status)
         self.bus.off("trimui_button", self.on_button)
         self.bus.off("trimui_mic", self.on_mic)
@@ -277,6 +285,10 @@ class TrimuiViewManager:
         if self.auth_state is not None:
             from trimui_auth import render_auth_screen
             self.fb.present(render_auth_screen(self.fb.width, self.fb.height, self.auth_state))
+            return
+        if self.package_state is not None:
+            from trimui_packages import render_packages
+            self.fb.present(render_packages(self.fb.width, self.fb.height, self.package_state))
             return
         w, h = self.fb.width, self.fb.height
         im = Image.new("RGB", (w, h), (16, 22, 34))
@@ -399,7 +411,7 @@ class TrimuiViewManager:
             d.text((x + 16, y + 15), button, font=self.buttonfont, fill=(16, 22, 34))
             d.text((x + badge_w + 18, y + 15), label, font=self.buttonfont, fill="white")
 
-        hint = "Bấm Y bất cứ lúc nào để hoán đổi giữa Server Đám Mây và Cục Bộ & Web"
+        hint = "SELECT: Cài gói game  |  Y: Đổi Server / Cục bộ"
         d.text((32, h - 30), hint, font=self.buttonfont, fill=(150, 170, 195))
 
         self._canvas = im

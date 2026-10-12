@@ -9,7 +9,7 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
 
-VERSION = "1.0.3"
+VERSION = "1.1.0"
 
 
 def render_auth_screen(width, height, state):

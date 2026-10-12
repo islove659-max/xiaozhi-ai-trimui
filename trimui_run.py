@@ -141,6 +141,7 @@ BTN_A = 305
 BTN_B = 304
 BTN_X = 308
 BTN_Y = 307
+BTN_SELECT = 314
 BTN_START = 315
 BTN_MENU = 316
 
@@ -169,11 +170,20 @@ class HybridController:
         self.loop = loop
         self.authorized = True
         self.auth_future = None
+        from trimui_packages import PackageUI
+        self.packages = PackageUI(container.event_bus)
+        self.package_future = None
         self.mode = "server"  # "server" hoặc "local"
         self.q_index = 0
         self.player = VoicePlayer() if VoicePlayer else None
         self.local_kb = KnowledgeBase() if LOCAL_AI_AVAILABLE else None
         self.is_answering = False
+
+    async def open_packages(self):
+        if self.player:
+            self.player.stop()
+        await self.container.event_bus.emit(Events.UI_ABORT_REQUEST)
+        await self.packages.open()
 
     async def reauthorize(self):
         from trimui_auth import authorize_cloud
@@ -362,6 +372,11 @@ def button_reader(loop, container, controller, stop_flag):
                 asyncio.run_coroutine_threadsafe(container.event_bus.emit("trimui_button", str(code)), loop)
                 logger.info("[trimui] Pressed button code=%s (mode=%s)", code, controller.mode)
 
+                # During installation cancel first, allowing transactional rollback.
+                if controller.authorized and controller.packages.active and controller.packages.busy and controller.packages.page == "install":
+                    asyncio.run_coroutine_threadsafe(controller.packages.handle(code), loop)
+                    continue
+
                 # Nút MENU: Thoát ứng dụng ở mọi chế độ
                 if code == BTN_MENU:
                     asyncio.run_coroutine_threadsafe(container.event_bus.emit(Events.UI_QUIT_REQUEST), loop)
@@ -374,6 +389,14 @@ def button_reader(loop, container, controller, stop_flag):
                 if not controller.authorized:
                     if code == BTN_A and (controller.auth_future is None or controller.auth_future.done()):
                         controller.auth_future = asyncio.run_coroutine_threadsafe(controller.reauthorize(), loop)
+                    continue
+
+                if code == BTN_SELECT:
+                    action = controller.packages.handle(code) if controller.packages.active else controller.open_packages()
+                    controller.package_future = asyncio.run_coroutine_threadsafe(action, loop)
+                    continue
+                if controller.packages.active:
+                    controller.package_future = asyncio.run_coroutine_threadsafe(controller.packages.handle(code), loop)
                     continue
 
                 # Nút Y: HOÁN ĐỔI CHẾ ĐỘ (SWAP)
@@ -420,6 +443,8 @@ async def setup_supplement_listeners(container, controller):
     # A failed network/authentication cannot silently grant offline access.
     async def on_network_error(_data=None):
         controller.authorized = False
+        if hasattr(controller, "packages"):
+            controller.packages.cancel.set()
         if controller.player:
             controller.player.stop()
         await container.event_bus.emit("trimui_auth_status", {
@@ -496,6 +521,10 @@ async def main():
         return await container.run(mode="cli", protocol="websocket")
     finally:
         stop_flag["stop"] = True
+        controller.packages.cancel.set()
+        if controller.package_future and not controller.package_future.done():
+            controller.package_future.cancel()
+            await asyncio.gather(asyncio.wrap_future(controller.package_future), return_exceptions=True)
         if controller.auth_future and not controller.auth_future.done():
             controller.auth_future.cancel()
             await asyncio.gather(asyncio.wrap_future(controller.auth_future), return_exceptions=True)

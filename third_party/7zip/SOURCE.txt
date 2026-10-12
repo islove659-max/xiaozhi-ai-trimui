@@ -1,0 +1,2 @@
+Unmodified 7-Zip 26.04 ARM64 binary from https://github.com/ip7z/7zip/releases/tag/26.04
+Corresponding upstream source is included as 7z2604-src.tar.xz.

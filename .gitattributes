@@ -5,3 +5,5 @@
 *.so.* binary
 *.dll binary
 *.dylib binary
+*.aarch64 binary
+*.xz binary
