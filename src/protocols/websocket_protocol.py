@@ -11,9 +11,10 @@ from src.logging import get_logger
 from src.protocols.protocol import Protocol
 from src.utils.config_manager import get_config
 
-# 服务器可能使用自签名证书，暂时跳过客户端证书验证
-# 以避免生产环境中非正规SSL证书导致连接失败
-ssl_context = ssl._create_unverified_context()
+# Brick Pro: verify TLS with the CA bundle shipped in pylibs.
+from src.utils.tls import client_ssl_context
+
+ssl_context = client_ssl_context()
 
 logger = get_logger()
 
@@ -59,6 +60,8 @@ class WebsocketProtocol(Protocol):
 
             # 判断是否应该使用 SSL
             current_ssl_context = None
+            if not isinstance(self.WEBSOCKET_URL, str) or not self.WEBSOCKET_URL.startswith(("wss://", "ws://")):
+                raise ValueError("Chưa có cấu hình server. Cần liên kết tài khoản Xiaozhi trước.")
             if self.WEBSOCKET_URL.startswith("wss://"):
                 current_ssl_context = ssl_context
 

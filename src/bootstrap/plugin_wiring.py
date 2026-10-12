@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import os
 from typing import TYPE_CHECKING
 
 from src.logging import get_logger
@@ -66,21 +67,10 @@ async def setup_plugins(
 
     # 创建插件实例（Audio 经事件发布 codec，不注入 MusicPlayer）
     audio_plugin = AudioPlugin()
-    wake_word_plugin = WakeWordPlugin()
     ui_plugin = UIPlugin(mode=mode, task_manager=container.tasks)
-    shortcuts_plugin = ShortcutsPlugin()
-    mcp_plugin = McpPlugin(
-        server=container.mcp_server,
-        music_player=container.music_player,
-    )
-
-    container.plugins.register(
-        mcp_plugin,
-        audio_plugin,
-        wake_word_plugin,
-        ui_plugin,
-        shortcuts_plugin,
-    )
+    mcp_plugin = McpPlugin(server=container.mcp_server, music_player=container.music_player)
+    optional = [] if os.environ.get("XIAOZHI_TRIMUI_LITE") == "1" else [WakeWordPlugin(), ShortcutsPlugin()]
+    container.plugins.register(mcp_plugin, audio_plugin, ui_plugin, *optional)
 
     await container.plugins.setup_all(ctx, cmd)
 

@@ -1,0 +1,34 @@
+XIAOZHI AI — TRIMUI HYBRID v1.0.3
+TrimUI Brick Pro / Stock 1.1.1 (20260717) / TOS 4.0
+Tác giả: islove659@gmail.com
+Mã nguồn: https://github.com/islove659-max/xiaozhi-ai-trimui
+
+CÀI MỚI VÀ CẬP NHẬT
+1. Tắt máy, cắm thẻ game vào PC.
+2. Giải nén ZIP vào gốc thẻ, ghi gộp Apps/ và System/.
+3. Cắm thẻ lại, bật máy và Wi-Fi, vào Apps → Xiaozhi AI.
+4. App kiểm tra quyền thiết bị với server và kết nối thành công mới mở giao diện.
+
+TÀI KHOẢN RIÊNG CỦA MỖI CHỦ MÁY
+Nếu màn hình hiện mã 6 số: trên điện thoại vào https://xiaozhi.me,
+đăng nhập tài khoản của bạn → Thêm thiết bị → nhập mã.
+Server xác nhận xong app tự tiếp tục. Mã do server cấp, không có mã cố định.
+Máy đã liên kết hợp lệ không cần nhập lại mã mỗi lần nhưng vẫn phải kiểm tra server.
+Không chép config/efuse từ máy khác. Gói không chứa ID, token hay tài khoản chung.
+
+LỖI KẾT NỐI / CHƯA LIÊN KẾT
+App ở lại màn hình kết nối. A: thử lại / MENU: thoát về menu máy.
+Y không bỏ qua xác thực; mất kết nối không tự chuyển cục bộ.
+Kiểm tra Wi-Fi và ngày giờ máy khi gặp lỗi HTTPS.
+Cập nhật giữ cấu hình ở /root/.local/share/py-xiaozhi/.
+
+ĐIỀU KHIỂN SAU KHI XÁC THỰC
+A: thu âm/gửi câu nói; B: ngắt; X: câu mẫu; START: tự động;
+Y: đổi Server ↔ Cục bộ & Internet; MENU: thoát.
+Cục bộ chỉ dùng sau khi app đã xác thực được thiết bị.
+Gemini tùy chọn: xem local_ai/HUONG_DAN_GEMINI.txt, giữ key riêng tư.
+
+YÊU CẦU
+Python 3.11 ARM64 của thẻ (System/bin/python3), Wi-Fi, tài khoản Xiaozhi riêng.
+Không nạp mô hình wake word/phím desktop trong chế độ TrimUI lite.
+Giấy phép MIT, giữ LICENSE và AUTHORS khi phân phối.

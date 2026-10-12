@@ -67,9 +67,8 @@ class OtaConfigClient:
         payload = self._build_ota_payload()
         logger.debug(f"OTA请求: {ota_url}")
 
-        ssl_context = ssl.create_default_context()
-        ssl_context.check_hostname = False
-        ssl_context.verify_mode = ssl.CERT_NONE
+        from src.utils.tls import client_ssl_context
+        ssl_context = client_ssl_context()
         timeout = aiohttp.ClientTimeout(total=10)
         connector = aiohttp.TCPConnector(ssl=ssl_context)
 
@@ -98,7 +97,7 @@ class OtaConfigClient:
             "SYSTEM_OPTIONS.NETWORK.ACTIVATION_VERSION", "v1"
         )
         if activation_version == "v2":
-            headers["Activation-Version"] = SystemConstants.APP_VERSION
+            headers["Activation-Version"] = "2"
         return headers
 
     def _build_ota_payload(self) -> Dict:

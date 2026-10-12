@@ -72,9 +72,8 @@ class ActivationHttpClient:
         retry_interval = 5
         timeout = aiohttp.ClientTimeout(total=10)
 
-        ssl_context = ssl.create_default_context()
-        ssl_context.check_hostname = False
-        ssl_context.verify_mode = ssl.CERT_NONE
+        from src.utils.tls import client_ssl_context
+        ssl_context = client_ssl_context()
         connector = aiohttp.TCPConnector(ssl=ssl_context)
 
         async with aiohttp.ClientSession(

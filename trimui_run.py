@@ -6,7 +6,7 @@ Nút điều khiển:
   Y (307)     -> SWAP: Hoán đổi qua lại giữa Server Đám Mây và Cục Bộ & Web.
   A (305)     -> Server: Thu âm/Gửi lời nói | Cục bộ: Hỏi câu hiện tại.
   B (304)     -> Server: Ngắt lời AI server | Cục bộ: Dừng giọng đọc loa.
-  START (315) -> Server: Bật/tắt tự động   | Cục bộ: Gửi câu hỏi lên Server (Bổ trợ).
+  START (315) -> Server: Bật/tắt tự động   | Cục bộ: Chuyển Server, bấm A để hỏi bằng giọng nói.
   X (308)     -> Server: Gửi câu mẫu server| Cục bộ: Đổi câu hỏi khác.
   MENU (316)  -> Thoát ứng dụng an toàn.
 """
@@ -158,7 +158,7 @@ SAMPLE_QUESTIONS = [
     "Nước nào có diện tích lớn nhất thế giới",
 ]
 
-TEST_SERVER_TEXT = "Xin chao, ban hay tu gioi thieu ngan gon bang tieng Viet"
+TEST_SERVER_TEXT = "Xin chào"
 
 
 class HybridController:
@@ -167,11 +167,24 @@ class HybridController:
     def __init__(self, container, loop):
         self.container = container
         self.loop = loop
+        self.authorized = True
+        self.auth_future = None
         self.mode = "server"  # "server" hoặc "local"
         self.q_index = 0
         self.player = VoicePlayer() if VoicePlayer else None
         self.local_kb = KnowledgeBase() if LOCAL_AI_AVAILABLE else None
         self.is_answering = False
+
+    async def reauthorize(self):
+        from trimui_auth import authorize_cloud
+        async def show(state):
+            await self.container.event_bus.emit("trimui_auth_status", state)
+        await self.container.protocol.disconnect()
+        self.authorized = await authorize_cloud(show)
+        if self.authorized:
+            self.container.protocol.set_protocol("websocket")
+            self.mode = "server"
+            await self.container.event_bus.emit("trimui_mode_change", "server")
 
     def swap_mode(self):
         """Hoán đổi giữa Server và Cục bộ."""
@@ -267,12 +280,13 @@ class HybridController:
             self.is_answering = False
 
     def send_current_to_server(self):
-        """Bổ trợ: Lấy câu hỏi từ kho cục bộ gửi thẳng lên Server Xiaozhi."""
+        """Cloud detect accepts wake words only; guide the user to ask by voice."""
         q = SAMPLE_QUESTIONS[self.q_index]
         logger.info(f"[hybrid] Bổ trợ: Gửi câu '{q}' lên Server")
         self.mode = "server"
         asyncio.run_coroutine_threadsafe(self.container.event_bus.emit("trimui_mode_change", "server"), self.loop)
-        asyncio.run_coroutine_threadsafe(self.container.event_bus.emit(Events.UI_SEND_TEXT, {"text": q}), self.loop)
+        asyncio.run_coroutine_threadsafe(self.container.event_bus.emit(
+            "trimui_local_update", {"status": "BẤM A VÀ NÓI CÂU HỎI", "answer": q}), self.loop)
 
     def check_local_supplement(self, spoken_text: str):
         """Bổ trợ: Khi Server nhận câu nói của người dùng, kiểm tra xem tài liệu máy có bổ trợ gì không."""
@@ -356,6 +370,12 @@ def button_reader(loop, container, controller, stop_flag):
                     threading.Timer(4.0, _force_exit, args=("MENU",)).start()
                     continue
 
+                # All controls remain locked until server authorization succeeds.
+                if not controller.authorized:
+                    if code == BTN_A and (controller.auth_future is None or controller.auth_future.done()):
+                        controller.auth_future = asyncio.run_coroutine_threadsafe(controller.reauthorize(), loop)
+                    continue
+
                 # Nút Y: HOÁN ĐỔI CHẾ ĐỘ (SWAP)
                 if code == BTN_Y:
                     controller.swap_mode()
@@ -397,23 +417,17 @@ def button_reader(loop, container, controller, stop_flag):
 
 async def setup_supplement_listeners(container, controller):
     """Lắng nghe các sự kiện để tự động bổ trợ giữa Server và Cục bộ."""
-    # 1. Tự động chuyển Cục bộ khi Server ngắt kết nối (Fallback)
-    async def on_disconnect(_data=None):
-        logger.warning("[hybrid] Server ngắt kết nối -> Tự động chuyển sang chế độ Cục bộ")
-        if controller.mode == "server":
-            controller.mode = "local"
-            await container.event_bus.emit("trimui_mode_change", "local")
-            await container.event_bus.emit(
-                "trimui_local_update",
-                {
-                    "status": "MẤT KẾT NỐI SERVER — ĐÃ CHUYỂN CỤC BỘ & WEB",
-                    "question": SAMPLE_QUESTIONS[controller.q_index],
-                    "answer": "Server bị gián đoạn. Bạn có thể bấm A để hỏi bằng dữ liệu máy & Internet.",
-                },
-            )
-
-    container.event_bus.on(Events.PROTOCOL_DISCONNECTED, on_disconnect)
-    container.event_bus.on(Events.NETWORK_ERROR, on_disconnect)
+    # A failed network/authentication cannot silently grant offline access.
+    async def on_network_error(_data=None):
+        controller.authorized = False
+        if controller.player:
+            controller.player.stop()
+        await container.event_bus.emit("trimui_auth_status", {
+            "status": "Kết nối tài khoản bị gián đoạn",
+            "detail": "Bấm A để kiểm tra lại kết nối và quyền truy cập server.",
+            "busy": False,
+        })
+    container.event_bus.on(Events.NETWORK_ERROR, on_network_error)
 
     # 2. Bổ trợ tri thức máy khi người dùng nói chuyện qua Server
     async def on_incoming_json(message):
@@ -428,6 +442,25 @@ async def setup_supplement_listeners(container, controller):
 
 
 async def main():
+    from trimui_auth import authorize_cloud, run_startup_gate
+    gate_heartbeat = asyncio.create_task(_heartbeat())
+    current = asyncio.current_task()
+    loop = asyncio.get_running_loop()
+    for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+        loop.add_signal_handler(sig, current.cancel)
+    try:
+        if os.environ.get("XIAOZHI_HEADLESS") == "1":
+            async def show(state):
+                logger.info("[auth] %s", state.get("status", ""))
+            ready = await authorize_cloud(show)
+        else:
+            ready = await run_startup_gate(find_gamepad)
+        if not ready:
+            return 1
+    finally:
+        gate_heartbeat.cancel()
+        await asyncio.gather(gate_heartbeat, return_exceptions=True)
+    # UI/audio are created only after OTA authorization and a real server hello.
     container = ServiceContainer()
     loop = asyncio.get_running_loop()
     stop_flag = {"stop": False}
@@ -463,6 +496,9 @@ async def main():
         return await container.run(mode="cli", protocol="websocket")
     finally:
         stop_flag["stop"] = True
+        if controller.auth_future and not controller.auth_future.done():
+            controller.auth_future.cancel()
+            await asyncio.gather(asyncio.wrap_future(controller.auth_future), return_exceptions=True)
         if controller.player:
             controller.player.stop()
         for t in bg_tasks:

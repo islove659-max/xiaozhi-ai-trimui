@@ -128,6 +128,7 @@ class TrimuiViewManager:
         except Exception:
             self._show_tamper_and_exit()
         self.running = False
+        self.auth_state = None
         self.status, self.connected, self.text = "Sẵn sàng — bấm A để nói", False, ""
         self.auto, self.emotion, self.music, self.last_button = False, "neutral", "", ""
         self.mic = {"enabled": False, "rms": 0.0, "peak": 0.0, "clipped": False, "overflows": 0}
@@ -148,11 +149,17 @@ class TrimuiViewManager:
         self.buttonfont = ImageFont.truetype(font_path, 22)
         self.badgefont = ImageFont.truetype(font_path, 24)
 
+        self.bus.on("trimui_auth_status", self.on_auth_status)
         self.bus.on("trimui_button", self.on_button)
         self.bus.on("trimui_mic", self.on_mic)
         self.bus.on("incoming_json", self.on_message)
         self.bus.on("trimui_mode_change", self.on_mode_change)
         self.bus.on("trimui_local_update", self.on_local_update)
+
+    async def on_auth_status(self, state):
+        self.auth_state = None if state.get("ready") else state
+        self.dirty = True
+        self._canvas = None
 
     async def on_mode_change(self, new_mode):
         self.mode = str(new_mode)
@@ -180,7 +187,11 @@ class TrimuiViewManager:
     async def on_message(self, message):
         if isinstance(message, dict):
             mtype = message.get("type")
-            if mtype == "stt":
+            if mtype == "alert":
+                self.status = "SERVER BÁO LỖI"
+                self.text = unicodedata.normalize("NFC", str(message.get("message", "Server từ chối yêu cầu.")))
+                self.dirty = True
+            elif mtype == "stt":
                 self.recognized = unicodedata.normalize("NFC", str(message.get("text", "")))
                 self.dirty = True
             elif mtype == "tts":
@@ -254,6 +265,7 @@ class TrimuiViewManager:
 
     async def close(self):
         self.running = False
+        self.bus.off("trimui_auth_status", self.on_auth_status)
         self.bus.off("trimui_button", self.on_button)
         self.bus.off("trimui_mic", self.on_mic)
         self.bus.off("incoming_json", self.on_message)
@@ -262,6 +274,10 @@ class TrimuiViewManager:
         self.fb.close()
 
     def render(self):
+        if self.auth_state is not None:
+            from trimui_auth import render_auth_screen
+            self.fb.present(render_auth_screen(self.fb.width, self.fb.height, self.auth_state))
+            return
         w, h = self.fb.width, self.fb.height
         im = Image.new("RGB", (w, h), (16, 22, 34))
         d = ImageDraw.Draw(im)
@@ -282,8 +298,8 @@ class TrimuiViewManager:
             "说话中...": "AI đang trả lời — bấm B để ngắt",
             "未连接": "Chưa kết nối Server",
             "Dang ket noi...": "Đang kết nối Server...",
-            "Ket noi that bai - bam START de thu lai": "Lỗi Server — Bấm Y chuyển Cục Bộ",
-            "Loi ket noi - bam START de thu lai": "Lỗi Server — Bấm Y chuyển Cục Bộ",
+            "Ket noi that bai - bam START de thu lai": "Lỗi Server — Bấm A để thử lại",
+            "Loi ket noi - bam START de thu lai": "Lỗi Server — Bấm A để thử lại",
         }
         status_str = status_map.get(self.status, self.status)
         if is_server and self.auto and self.status == "聆听中...":
@@ -363,7 +379,7 @@ class TrimuiViewManager:
             controls = [
                 ("A", "Hỏi câu hiện tại"),
                 ("B", "Dừng giọng đọc"),
-                ("START", "Gửi câu lên Server"),
+                ("START", "Sang Server để nói"),
                 ("X", "Đổi câu hỏi khác"),
                 ("Y", "ĐỔI SANG SERVER"),
                 ("MENU", "Thoát về menu"),
