@@ -141,7 +141,9 @@ BTN_A = 305
 BTN_B = 304
 BTN_X = 308
 BTN_Y = 307
-BTN_SELECT = 314
+BTN_L1 = 310  # tab trước: Trợ lý AI
+BTN_R1 = 311  # tab sau: Cài gói game
+DPAD_CODES = (103, 108, 544, 545)
 BTN_START = 315
 BTN_MENU = 316
 
@@ -366,7 +368,13 @@ def button_reader(loop, container, controller, stop_flag):
                 record = pending[:EV_SIZE]
                 del pending[:EV_SIZE]
                 _, _, etype, code, value = struct.unpack(EV_FMT, record)
-                if etype != EV_KEY or value != 1:
+                if etype != EV_KEY:
+                    continue
+                # Giữ D-pad (value 2) chỉ dùng để cuộn danh sách ở tab Cài gói game
+                if value == 2 and code in DPAD_CODES and controller.authorized and controller.packages.active:
+                    controller.package_future = asyncio.run_coroutine_threadsafe(controller.packages.handle(code, repeat=True), loop)
+                    continue
+                if value != 1:
                     continue
 
                 asyncio.run_coroutine_threadsafe(container.event_bus.emit("trimui_button", str(code)), loop)
@@ -391,9 +399,12 @@ def button_reader(loop, container, controller, stop_flag):
                         controller.auth_future = asyncio.run_coroutine_threadsafe(controller.reauthorize(), loop)
                     continue
 
-                if code == BTN_SELECT:
-                    action = controller.packages.handle(code) if controller.packages.active else controller.open_packages()
-                    controller.package_future = asyncio.run_coroutine_threadsafe(action, loop)
+                # L1/R1: chuyển tab (SELECT là phím hệ thống thoát app/game nên không dùng)
+                if code in (BTN_L1, BTN_R1):
+                    if code == BTN_R1 and not controller.packages.active:
+                        controller.package_future = asyncio.run_coroutine_threadsafe(controller.open_packages(), loop)
+                    elif code == BTN_L1 and controller.packages.active:
+                        controller.package_future = asyncio.run_coroutine_threadsafe(controller.packages.leave(), loop)
                     continue
                 if controller.packages.active:
                     controller.package_future = asyncio.run_coroutine_threadsafe(controller.packages.handle(code), loop)

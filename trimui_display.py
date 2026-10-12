@@ -411,7 +411,7 @@ class TrimuiViewManager:
             d.text((x + 16, y + 15), button, font=self.buttonfont, fill=(16, 22, 34))
             d.text((x + badge_w + 18, y + 15), label, font=self.buttonfont, fill="white")
 
-        hint = "SELECT: Cài gói game  |  Y: Đổi Server / Cục bộ"
+        hint = "R1 ▸ Cài gói game   |   Y: Đổi Server / Cục bộ"
         d.text((32, h - 30), hint, font=self.buttonfont, fill=(150, 170, 195))
 
         self._canvas = im
