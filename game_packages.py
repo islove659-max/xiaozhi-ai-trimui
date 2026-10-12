@@ -69,10 +69,12 @@ README_TEXT = '''CHÉP GAME VÀO ĐÂY — Xiaozhi AI tự nhận diện và cà
      - gói port PortMaster (.zip có file .sh và thư mục port)
      - dữ liệu game cho port (ví dụ file .pck/.exe của game mua trên Steam, itch.io)
 3. Cắm thẻ lại máy. Mở app Xiaozhi AI, bấm R1 để sang tab "Cài gói game".
-4. Chọn gói bằng phím lên/xuống, bấm A để xem trước, bấm A lần nữa để cài.
+4. Chọn gói bằng phím lên/xuống rồi bấm A: AI tự nhận diện và tự cài vào đúng chỗ.
+   Hoặc bấm START: AI cài tất cả gói trong thư mục này một lượt.
    - App tự biết game của máy nào. Chưa nhận ra thì AI (Gemini) chọn giúp.
-   - Game port: cài gói port trước, mở app PortMaster cho nó cài xong,
-     rồi mới cài gói dữ liệu game.
+   - Game port: app tự cài port bằng PortMaster (tải runtime nếu có Wi-Fi),
+     gói dữ liệu game của port sẽ được cài sau khi port xong.
+   - Muốn tự kiểm tra trước khi cài: bấm X để xem trước.
 5. Cài xong bấm X để xoá gói gốc trong thư mục này cho đỡ tốn chỗ.
 
 App không ghi đè game đang có và không tự chạy game.
@@ -346,7 +348,7 @@ def pending_ports(root,exclude=None,sevenzip=None):
             if not pm or (root/PORTS_DIR/pm/'port.json').exists():continue
             data=json.loads(pkg.read(pm+'/port.json').decode('utf-8-sig'))
             texts=[pkg.read(e.name,512*1024).decode('utf-8','replace') for e in pkg.entries if '/' not in e.name and e.name.endswith('.sh')]
-            info=_port_info(pm,data,texts);info['package']=p.name;info['in_autoinstall']=p.parent==auto
+            info=_port_info(pm,data,texts);info['package']=p.name;info['path']=p;info['in_autoinstall']=p.parent==auto
             found[pm]=info
         except (OSError,ValueError,KeyError):continue
     return found
@@ -648,6 +650,66 @@ def _download(item,f,cancel):
             if count>item['size']:raise ValueError('File tải vượt kích thước khai báo.')
             digest.update(chunk);f.write(chunk)
         if count!=item['size'] or digest.hexdigest()!=item['sha256']:raise ValueError('File tải sai kích thước/SHA256; không cài.')
+
+
+def waiting_port_for(path,root=Path('/mnt/SDCARD'),sevenzip=None):
+    """Gói dữ liệu này thuộc port nào đang chờ cài (đã chép vào thẻ nhưng chưa cài)? Trả info (có 'path') hoặc None."""
+    pkg=Package(path,sevenzip);waiting=pending_ports(root,exclude=pkg.path,sevenzip=sevenzip)
+    match=_match_port(pkg.entries,waiting,pkg.path.name)
+    return waiting[match[0]] if match else None
+
+
+def is_portmaster_package(path,sevenzip=None):
+    try:return bool(_portmaster_dir(Package(path,sevenzip).entries))
+    except (OSError,ValueError):return False
+
+
+def _portmaster(root,args,timeout,cancel=None):
+    """Chạy harbourmaster (CLI của chính PortMaster) như PortMaster autoinstall vẫn làm.
+    Bỏ PYTHONPATH của Xiaozhi để PortMaster dùng đúng pylibs của nó. Trả (mã thoát, đuôi log)."""
+    pm=Path(root)/PORTMASTER_DIR
+    env={k:v for k,v in os.environ.items() if k not in ('PYTHONPATH','PYTHONHOME')}
+    import sys
+    with tempfile.TemporaryFile() as out:
+        p=subprocess.Popen([sys.executable,'./harbourmaster','--quiet']+list(args),cwd=pm,env=env,stdout=out,stderr=subprocess.STDOUT)
+        stop=_kill_on_cancel(p,cancel,timeout)
+        try:code=p.wait()
+        finally:stop()
+        out.seek(0);tail=out.read()[-3000:].decode('utf-8','replace')
+    return code,tail
+
+
+def install_port_now(zip_path,root=Path('/mnt/SDCARD'),progress=None,cancel=None):
+    """Cài ngay gói port PortMaster (đã chép vào autoinstall) bằng harbourmaster, rồi bảo đảm có runtime.
+    Trả danh sách dòng kết quả cho người dùng; ném ValueError nếu không cài được."""
+    root=Path(root);progress=progress or (lambda t:None);zip_path=Path(zip_path)
+    pkg=Package(zip_path);pm_dir=_portmaster_dir(pkg.entries)
+    if not pm_dir:raise ValueError('Gói không phải port PortMaster.')
+    data=json.loads(pkg.read(pm_dir+'/port.json').decode('utf-8-sig'))
+    title=(data.get('attr') or {}).get('title') or pm_dir
+    progress('PortMaster đang cài port %s...'%title)
+    code,log=_portmaster(root,['install',str(zip_path.absolute())],900,cancel)
+    if cancel and cancel.is_set():raise InterruptedError('Đã hủy cài đặt.')
+    if code!=0 or not (root/PORTS_DIR/pm_dir/'port.json').is_file():
+        raise ValueError('PortMaster không cài được port %s (mã %s). Gói giữ nguyên trong autoinstall: mở app PortMaster để thử lại.'%(title,code))
+    zip_path.unlink(missing_ok=True)   # giống autoinstall: cài xong thì xoá zip để PortMaster không cài lại
+    lines=['Đã cài port %s vào mục Ports.'%title]
+    libs=root/PORTMASTER_DIR/'libs'
+    for rt in (data.get('attr') or {}).get('runtime') or []:
+        if not isinstance(rt,str) or (libs/rt).is_file():continue
+        progress('Đang tải runtime %s (cần Wi-Fi)...'%rt)
+        _portmaster(root,['runtime_check',rt],1800,cancel)
+        lines.append(('Đã tải runtime ' if (libs/rt).is_file() else 'Chưa tải được runtime (cần Wi-Fi, game sẽ tự tải khi mở): ')+rt)
+    return lines
+
+
+def check_port_data(port_dir,root=Path('/mnt/SDCARD')):
+    """Sau khi chép dữ liệu: tên file script port nhắc tới mà vẫn chưa có trong thư mục port (gợi ý, không chắc chắn)."""
+    root=Path(root);info=installed_ports(root).get(port_dir)
+    if not info:return []
+    base=root/PORTS_DIR/port_dir
+    have={p.name.casefold() for p in base.rglob('*') if p.is_file()}
+    return sorted(n for n in info['refs'] if n not in have and not WEAK.match(n) and not n.endswith('.zip'))
 
 
 def remove_source(path,root=Path('/mnt/SDCARD')):

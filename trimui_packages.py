@@ -10,7 +10,8 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont
-from game_packages import preview, install, remove_source, system_label, list_packages, PACKAGE_DIRS
+from game_packages import (preview, install, remove_source, system_label, list_packages, PACKAGE_DIRS,
+                           waiting_port_for, install_port_now, check_port_data, is_portmaster_package)
 
 KIND_LABEL = {'rom': 'ROM', 'rooted': 'Gói sắp sẵn theo thư mục thẻ', 'portmaster': 'Port PortMaster',
               'port_data': 'Dữ liệu game cho port đã cài'}
@@ -167,7 +168,7 @@ class PackageUI:
         self.page = 'list'
         self.state = {}
         self.cancel = threading.Event()
-        self.installed_source = None
+        self.installed_sources = []   # gói gốc đã cài xong, X để xoá
         self.system_index = 0
         self.advice_back = 'list'
         self.manual_plan = None   # danh sách chọn tay khi app/AI chưa nhận ra gói
@@ -218,9 +219,10 @@ class PackageUI:
                          'selected': self.index,
                          'empty': 'Chưa có game nào để cài. Cách chép: cắm thẻ nhớ vào máy tính → mở thư mục '
                                   + PACKAGE_DIRS[0] + ' (ngoài cùng thẻ) → chép game vào (zip, 7z, thư mục hoặc file ROM) '
-                                  '→ cắm thẻ lại máy → vào đây bấm X để làm mới.',
+                                  '→ cắm thẻ lại máy → mở lại tab này.',
                          'hint': 'Chép game vào thư mục ' + PACKAGE_DIRS[0] + ' ở ngoài cùng thẻ nhớ (có file HUONG_DAN.txt)',
-                         'controls': [('A', 'Xem trước'), ('Y', 'Hỏi AI về gói'), ('X', 'Làm mới'), ('B', 'Về Trợ lý AI')]})
+                         'controls': [('A', 'AI tự cài gói này'), ('START', 'AI cài tất cả'), ('X', 'Xem trước'),
+                                      ('Y', 'Hỏi AI'), ('B', 'Về Trợ lý AI')]})
 
     # ---------- xem trước ----------
     async def read_plan(self, system=None):
@@ -314,7 +316,7 @@ class PackageUI:
 
             kind, source = self.plan['kind'], self.plan['source']
             result = await self.run(install, self.plan, self.cancel, progress, True)
-            self.installed_source = source
+            self.installed_sources = [Path(source)]
             tail = {'portmaster': 'Bước tiếp: thoát app (MENU), mở app PortMaster — nó tự cài port. Nếu game cần dữ liệu riêng '
                                   '(bản mua trên Steam/itch.io), quay lại đây cài gói dữ liệu sau khi port đã cài xong.',
                     'port_data': 'Mở game trong mục Ports. Lần đầu port có thể mất vài phút xử lý dữ liệu.'}.get(
@@ -326,7 +328,7 @@ class PackageUI:
                              'lines': sample + [tail],
                              'controls': [('X', 'Xoá gói gốc'), ('B', 'Danh sách gói')]})
         except Exception as exc:
-            self.installed_source = None
+            self.installed_sources = []
             await self.show({'status': 'Không cài được gói', 'tone': 'error', 'table': [('Gói', name)],
                              'lines': [str(exc), 'Không có file nào trên thẻ bị thay đổi.'],
                              'controls': [('B', 'Danh sách gói')]})
@@ -336,16 +338,18 @@ class PackageUI:
             self.plan = None
 
     async def remove_installed(self):
-        if not self.installed_source:
-            return
-        source = self.installed_source
-        self.installed_source = None
-        try:
-            await self.run(remove_source, source, self.root)
-            await self.show({'status': 'Đã xoá gói gốc', 'lines': [Path(source).name], 'controls': [('B', 'Danh sách gói')]})
-        except Exception as exc:
-            await self.show({'status': 'Không xoá được gói gốc', 'tone': 'error', 'lines': [str(exc)],
-                             'controls': [('B', 'Danh sách gói')]})
+        sources, self.installed_sources = self.installed_sources, []
+        removed, errors = [], []
+        for source in sources:
+            if not Path(source).exists():   # zip port trong autoinstall đã được xoá sau khi cài
+                continue
+            try:
+                await self.run(remove_source, source, self.root)
+                removed.append(Path(source).name)
+            except Exception as exc:
+                errors.append('%s: %s' % (Path(source).name, exc))
+        await self.show({'status': 'Đã xoá %d gói gốc' % len(removed), 'tone': 'warn' if errors else None,
+                         'lines': removed + errors, 'controls': [('B', 'Danh sách gói')]})
 
     # ---------- AI ----------
     async def ask_ai(self):
@@ -375,6 +379,120 @@ class PackageUI:
         finally:
             self.busy = False
             self.page = 'advice'
+
+    # ---------- AI tự cài ----------
+    def _auto_one(self, entry, say, depth=0):
+        """Chạy trong luồng riêng: tự nhận diện → (AI chọn) → (cài port đang chờ trước) → cài → PortMaster → kiểm tra.
+        Trả (ok, các dòng kết quả). Không hỏi người dùng; gói không chắc chắn thì dừng và nói lý do."""
+        from game_package_ai import suggest_target
+        lines = []
+        say('Đang nhận diện: ' + entry.name)
+        try:
+            plan = preview(entry, self.root)
+        except ValueError as exc:
+            # Dữ liệu của port đã chép nhưng chưa cài: tự cài port đó trước rồi làm lại
+            waiting = waiting_port_for(entry, self.root) if depth == 0 else None
+            if not waiting:
+                return False, [str(exc)]
+            say('Cần cài port %s trước...' % waiting['title'])
+            ok, sub = self._auto_one(waiting['path'], say, depth + 1)
+            lines += sub
+            if not ok:
+                return False, lines + ['Chưa cài được port nên chưa chép dữ liệu game.']
+            self.installed_sources.append(waiting['path'])
+            plan = preview(entry, self.root)
+        if plan.get('needs_system'):
+            say('App chưa nhận ra, đang nhờ AI xem gói...')
+            try:
+                choice, why = suggest_target(entry, plan['systems'], plan.get('labels', {}), self.root)
+            except Exception as exc:
+                return False, ['App chưa nhận ra gói và chưa hỏi được AI: ' + str(exc), 'Bấm X ở danh sách để xem trước và chọn tay.']
+            if not choice:
+                return False, ['AI chưa đủ căn cứ để cài: ' + why, 'Bấm X ở danh sách để xem trước và chọn tay.']
+            lines.append('AI chọn %s: %s' % (plan.get('labels', {}).get(choice, choice), why))
+            plan = preview(entry, self.root, choice)
+        kind = plan['kind']
+        if kind == 'portmaster' and any(n.startswith('Port này đã cài') for n in plan.get('notes', [])):
+            return True, ['Port %s đã cài sẵn trong mục Ports, bỏ qua.' % (plan.get('title') or '')]
+        result = install(plan, self.cancel, say, True)
+        if kind == 'portmaster':
+            lines += install_port_now(self.root / result[0], self.root, say, self.cancel)
+        else:
+            where = plan.get('target_dir') or ''
+            lines.append('Đã chép %d file vào /%s.' % (len(result), where))
+            if kind == 'port_data':
+                lines.append('Game %s đã đủ dữ liệu để mở trong mục Ports.' % (plan.get('title') or ''))
+                missing = check_port_data(plan['port_dir'], self.root)
+                if missing:
+                    lines.append('Script port còn nhắc tới (thường do port tự tạo khi chạy lần đầu): ' + ', '.join(missing[:5]))
+            elif kind == 'rom':
+                lines.append('Vào menu %s để chơi.' % system_label(plan.get('system') or ''))
+        lines += plan.get('notes', [])[:2]
+        return True, lines
+
+    async def _auto_run(self, entries, title):
+        self.busy = True
+        self.page = 'install'
+        self.cancel.clear()
+        self.installed_sources = []
+        loop = asyncio.get_running_loop()
+        done = []
+        cancel_keys = [('B', 'Dừng'), ('MENU', 'Dừng')]
+
+        def say(text, i=[0]):
+            m = re.search(r'(\d+)/(\d+)', text)
+            part = int(m.group(1)) / max(1, int(m.group(2))) if m else 0.0
+            frac = (len(done) + part) / max(1, len(entries))
+            state = {'status': title, 'lines': ['Gói %d/%d' % (min(len(done) + 1, len(entries)), len(entries)), text],
+                     'progress': frac, 'controls': cancel_keys}
+            asyncio.run_coroutine_threadsafe(self.show(state), loop)
+
+        try:
+            for entry in entries:
+                if entry in self.installed_sources:   # đã cài kèm ở bước trước (port của gói dữ liệu)
+                    done.append((entry, True, ['Đã cài ở bước trước.']))
+                    continue
+                if self.cancel.is_set():
+                    done.append((entry, False, ['Đã dừng trước khi cài.']))
+                    continue
+                try:
+                    ok, lines = await self.run(self._auto_one, entry, say)
+                except InterruptedError:
+                    ok, lines = False, ['Đã dừng, không có file nào bị thay đổi.']
+                except Exception as exc:
+                    ok, lines = False, [str(exc)]
+                if ok:
+                    self.installed_sources.append(entry)
+                done.append((entry, ok, lines))
+            ok_n = sum(1 for _, ok, _ in done if ok)
+            if len(entries) == 1:
+                entry, ok, lines = done[0]
+                await self.show({'status': 'AI đã cài xong' if ok else 'AI chưa cài được gói này',
+                                 'tone': None if ok else 'warn', 'table': [('Gói', entry.name)], 'lines': lines,
+                                 'controls': ([('X', 'Xoá gói gốc')] if ok else []) + [('B', 'Danh sách gói')]})
+            else:
+                lines = []
+                for entry, ok, msg in done:
+                    lines.append(('✓ ' if ok else '✗ ') + entry.name + ' — ' + (msg[-1] if ok else msg[0]))
+                await self.show({'status': 'AI đã cài %d/%d gói' % (ok_n, len(entries)), 'tone': None if ok_n == len(entries) else 'warn',
+                                 'lines': lines, 'scroll': 0,
+                                 'controls': ([('X', 'Xoá các gói đã cài')] if ok_n else []) + [('Lên/Xuống', 'Cuộn'), ('B', 'Danh sách gói')]})
+        finally:
+            self.busy = False
+            self.page = 'result'
+            self.plan = None
+
+    async def auto_one(self):
+        if self.entries:
+            await self._auto_run([self.entries[self.index]], 'AI đang cài gói...')
+
+    async def auto_all(self):
+        if not self.entries:
+            return
+        # Port trước (dữ liệu game cần port đã cài), rồi mới tới dữ liệu game và ROM
+        ports = [p for p in self.entries if await self.run(is_portmaster_package, p)]
+        rest = [p for p in self.entries if p not in ports]
+        await self._auto_run(ports + rest, 'AI đang cài tất cả...')
 
     # ---------- phím ----------
     async def handle(self, code, repeat=False):
@@ -410,14 +528,17 @@ class PackageUI:
                 await self.open()
         elif code == 305:   # A
             if self.page == 'list':
-                await self.read_plan()
+                await self.auto_one()
             elif self.page == 'systems':
                 await self.read_plan(self.plan['systems'][self.system_index])
             elif self.page == 'preview':
                 await self.do_install()
+        elif code == 315:   # START
+            if self.page == 'list':
+                await self.auto_all()
         elif code == 308:   # X
             if self.page == 'list':
-                await self.open()
+                await self.read_plan()
             elif self.page == 'preview' and self.ai_choice and self.manual_plan:
                 self.plan = self.manual_plan
                 self.page = 'systems'
