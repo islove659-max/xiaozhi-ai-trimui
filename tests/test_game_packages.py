@@ -31,7 +31,7 @@ base=Path(tempfile.mkdtemp(prefix='game_package_tests_'));root=base/'card';root.
 for system,extensions in [('GBA','gba|zip'),('GB','gb|zip'),('ARCADE','zip'),('PORTS','sh|zip')]:
  (root/'Roms'/system).mkdir(parents=True);(root/'Emus'/system).mkdir(parents=True)
  (root/'Emus'/system/'config.json').write_text(json.dumps({'rompath':'../../Roms/'+system,'extlist':extensions}))
-(root/'GamePackages').mkdir()
+(root/'GamePackages').mkdir();(root/'Apps/PortMaster/PortMaster').mkdir(parents=True)
 
 # Port đã cài theo đúng bố cục PortMaster trên Brick Pro: Data/ports/<dir>/port.json + Data/ports/<Script>.sh
 def installed_port(directory,script,title,body,gamedata=True):
@@ -116,11 +116,11 @@ try:
  # ---------- Port PortMaster ----------
  pm={'Demo.sh':b'#!/bin/bash\necho demo\n','demo/port.json':json.dumps({'version':4,'items':['Demo.sh','demo/']}).encode(),'demo/demo.bin':b'bin'}
  p=archive('demo.zip',pm);plan=gp.preview(p,root)
- check('PortMaster zip goes to autoinstall',plan['kind']=='portmaster' and plan['items'][0]['target']=='Data/ports/autoinstall/demo.zip')
- gp.install(plan);check('PortMaster zip copied byte-for-byte',(root/'Data/ports/autoinstall/demo.zip').read_bytes()==p.read_bytes())
+ check('PortMaster zip goes to autoinstall',plan['kind']=='portmaster' and plan['items'][0]['target']=='Apps/PortMaster/PortMaster/autoinstall/demo.zip')
+ gp.install(plan);check('PortMaster zip copied byte-for-byte',(root/'Apps/PortMaster/PortMaster/autoinstall/demo.zip').read_bytes()==p.read_bytes())
  plan=gp.preview(folder('Demo2',{k.replace('demo','demo2').replace('Demo','Demo2'):v for k,v in pm.items()}),root)
  gp.install(plan)
- with zipfile.ZipFile(root/'Data/ports/autoinstall/Demo2.zip') as z:
+ with zipfile.ZipFile(root/'Apps/PortMaster/PortMaster/autoinstall/Demo2.zip') as z:
   check('unpacked PortMaster folder repacked as valid zip',sorted(z.namelist())==['Demo2.sh','demo2/demo2.bin','demo2/port.json'] and z.read('demo2/demo2.bin')==b'bin')
  # ---------- Dữ liệu game cho port đã cài ----------
  data={'Celeste Linux/Celeste.exe':b'exe','Celeste Linux/Content/Maps/a.bin':b'map','Celeste Linux/FNA.dll':b'fna','readme.txt':b'top'}
@@ -154,6 +154,23 @@ try:
  (root/'Roms/MD').mkdir();(root/'Emus/MD').mkdir();(root/'Emus/MD/config.json').write_text(json.dumps({'rompath':'../../Roms/MD','extlist':'md|gen|smd|zip'}))
  plan=gp.preview(archive('sonic.zip',{'Sonic.gen':b's'}),root)
  check('system inferred from emulator extlist on card',plan.get('system')=='MD' and plan['items'][0]['target']=='Roms/MD/Sonic.gen')
+ # Emulator không khai báo extlist (N64, NDS... trên Stock): nhận ROM, bỏ file rác đi kèm
+ (root/'Roms/N64').mkdir();(root/'Emus/N64').mkdir();(root/'Emus/N64/config.json').write_text(json.dumps({'rompath':'../../Roms/N64'}))
+ plan=gp.preview(folder('Harvest Moon 64',{'Harvest Moon 64 (USA).n64':b'n'*64,'readme.txt':b'r','cover.jpg':b'j'}),root)
+ check('emulator without extlist accepts ROM, skips junk',plan.get('system')=='N64' and [i['target'] for i in plan['items']]==['Roms/N64/Harvest Moon 64 (USA).n64'])
+ # Thư mục chép game cho người mới + dữ liệu của port đã chép nhưng chưa cài
+ folders=gp.package_folders(root)
+ check('CHEP_GAME_VAO_DAY created with guide',(root/'CHEP_GAME_VAO_DAY/HUONG_DAN.txt').is_file() and root/'CHEP_GAME_VAO_DAY' in folders)
+ port_zip=root/'CHEP_GAME_VAO_DAY/Last Game (PortMaster).zip'
+ with zipfile.ZipFile(port_zip,'w') as z:
+  z.writestr('Last Game.sh','cd $GAMEDIR\nif [ -f ./gamedata/LastGame.pck ]; then patch; fi\nrun gamedata/LastGamePatched.pck\n')
+  z.writestr('lastgame/port.json',json.dumps({'items':['Last Game.sh','lastgame/'],'attr':{'title':'The Last Game'}}))
+ names=[p.name for p in gp.list_packages(root)]
+ check('package list skips guide, reads both folders','HUONG_DAN.txt' not in names and 'Last Game (PortMaster).zip' in names)
+ plan=gp.preview(port_zip,root)
+ check('PortMaster package uses PortMaster autoinstall and real title',plan['items'][0]['target']=='Apps/PortMaster/PortMaster/autoinstall/Last Game (PortMaster).zip' and plan['title']=='The Last Game')
+ rejects('data for a port not yet installed explains what to install first',
+  lambda:gp.preview(folder('Last Game Steam',{'Game/LastGame.pck':b'p'}),root),'Last Game (PortMaster).zip')
  import game_package_ai as gpa
  p=archive('ai-pick.zip',{'mystery.bin':b'm'});plan=gp.preview(p,root)
  with patch.object(gpa,'_gemini_json',lambda prompt:{'choice':'System/bin','confidence':'cao','reason':'x'}):

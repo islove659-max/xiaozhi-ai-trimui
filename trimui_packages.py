@@ -10,7 +10,7 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont
-from game_packages import preview, install, remove_source, system_label
+from game_packages import preview, install, remove_source, system_label, list_packages, PACKAGE_DIRS
 
 KIND_LABEL = {'rom': 'ROM', 'rooted': 'Gói sắp sẵn theo thư mục thẻ', 'portmaster': 'Port PortMaster',
               'port_data': 'Dữ liệu game cho port đã cài'}
@@ -194,10 +194,7 @@ class PackageUI:
         self.active = True
         self.page = 'list'
         self.plan = None
-        folder = self.root / 'GamePackages'
-        folder.mkdir(exist_ok=True)
-        self.entries = sorted([p for p in folder.iterdir() if not p.is_symlink() and not p.name.startswith('.')],
-                              key=lambda p: p.name.casefold())
+        self.entries = await self.run(list_packages, self.root)
         self.index = min(self.index, max(0, len(self.entries) - 1))
         await self.list_page()
 
@@ -219,8 +216,10 @@ class PackageUI:
     async def list_page(self):
         await self.show({'status': 'Chọn gói để xem trước', 'rows': [self._row(p) for p in self.entries],
                          'selected': self.index,
-                         'empty': 'Chưa có gói nào. Chép ZIP, 7z, thư mục game hoặc file ROM vào thư mục GamePackages trên thẻ rồi bấm X.',
-                         'hint': 'Thư mục /GamePackages  •  tự nhận diện ROM, port PortMaster và dữ liệu game của port',
+                         'empty': 'Chưa có game nào để cài. Cách chép: cắm thẻ nhớ vào máy tính → mở thư mục '
+                                  + PACKAGE_DIRS[0] + ' (ngoài cùng thẻ) → chép game vào (zip, 7z, thư mục hoặc file ROM) '
+                                  '→ cắm thẻ lại máy → vào đây bấm X để làm mới.',
+                         'hint': 'Chép game vào thư mục ' + PACKAGE_DIRS[0] + ' ở ngoài cùng thẻ nhớ (có file HUONG_DAN.txt)',
                          'controls': [('A', 'Xem trước'), ('Y', 'Hỏi AI về gói'), ('X', 'Làm mới'), ('B', 'Về Trợ lý AI')]})
 
     # ---------- xem trước ----------
@@ -316,7 +315,8 @@ class PackageUI:
             kind, source = self.plan['kind'], self.plan['source']
             result = await self.run(install, self.plan, self.cancel, progress, True)
             self.installed_source = source
-            tail = {'portmaster': 'Mở app PortMaster để hoàn tất cài port.',
+            tail = {'portmaster': 'Bước tiếp: thoát app (MENU), mở app PortMaster — nó tự cài port. Nếu game cần dữ liệu riêng '
+                                  '(bản mua trên Steam/itch.io), quay lại đây cài gói dữ liệu sau khi port đã cài xong.',
                     'port_data': 'Mở game trong mục Ports. Lần đầu port có thể mất vài phút xử lý dữ liệu.'}.get(
                 kind, 'Về menu game, làm mới danh sách để thấy game mới.')
             import posixpath

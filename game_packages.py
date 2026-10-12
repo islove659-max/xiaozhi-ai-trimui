@@ -1,9 +1,10 @@
 """Local package inspection and transactional game installation. Never executes games.
 
-Nguồn: ZIP, 7z, thư mục đã giải nén hoặc một file ROM lẻ trong /mnt/SDCARD/GamePackages.
+Nguồn: ZIP, 7z, thư mục đã giải nén hoặc một file ROM lẻ trong thư mục CHEP_GAME_VAO_DAY ở gốc thẻ nhớ
+(tên tự giải thích cho người mới; vẫn đọc thư mục cũ GamePackages).
 Nơi cài được suy ra từ chính thẻ nhớ:
   - ROM          -> Roms/<HỆ>/            (Emus/*/config.json: rompath + extlist)
-  - Port PortMaster (có <dir>/port.json) -> Data/ports/autoinstall/<tên>.zip, PortMaster tự cài khi mở
+  - Port PortMaster (có <dir>/port.json) -> Apps/PortMaster/PortMaster/autoinstall/<tên>.zip, PortMaster tự cài khi mở
   - Dữ liệu game của Port đã cài -> Data/ports/<dir>/gamedata/ (đối chiếu tên file với script của port)
   - Gói đã sắp sẵn thư mục gốc thẻ (Roms/, Imgs/, Data/ports/) -> giữ nguyên đường dẫn
 Không ghi đè file khác nội dung; yêu cầu không rõ thì báo, không tự đoán.
@@ -26,7 +27,12 @@ MAX_BYTES = 16 * 1024**3
 MAX_FILES = 20000
 MANIFEST = 'xiaozhi-game.json'
 INFER = {'.gba':'GBA','.agb':'GBA','.gb':'GB','.gbc':'GBC','.nes':'FC',
-         '.sfc':'SFC','.smc':'SFC','.nds':'NDS','.cso':'PSP','.p8':'PICO8','.p8.png':'PICO8'}
+         '.sfc':'SFC','.smc':'SFC','.nds':'NDS','.cso':'PSP','.p8':'PICO8','.p8.png':'PICO8',
+         '.n64':'N64','.z64':'N64','.v64':'N64','.gg':'GG','.a26':'ATARI2600','.a78':'ATARI7800','.lnx':'LYNX',
+         '.gdi':'DC','.cdi':'DC','.md':'MD','.gen':'MD','.smd':'MD','.sms':'MS','.pce':'PCE','.ngp':'NGP','.ngc':'NGP',
+         '.ws':'WS','.wsc':'WS'}
+# File đi kèm ROM, không phải game: không chép vào thư mục ROM (emulator không khai báo extlist nhận mọi file)
+JUNK_EXT = {'txt','nfo','url','md5','sfv','jpg','jpeg','png','gif','bmp','pdf','htm','html','db','ini','json','xml','diz','doc','docx','lnk'}
 # Tên dễ hiểu cho người mới (thư mục Roms/<HỆ> của TrimUI Stock)
 SYSTEM_NAMES = {'ARCADE':'Arcade','ATARI2600':'Atari 2600','ATARI7800':'Atari 7800','CPS1':'Capcom CPS1','CPS2':'Capcom CPS2',
     'CPS3':'Capcom CPS3','DC':'Sega Dreamcast','EASYRPG':'RPG Maker 2000/2003','FBNEO':'Arcade FinalBurn Neo','FC':'NES / Famicom',
@@ -44,8 +50,53 @@ def system_label(code):
 
 ARCHIVE_ROM_SYSTEMS = {'ARCADE','CPS1','CPS2','CPS3','FBNEO','MAME','MAME2003PLUS','MAME2010','NEOGEO','PGM'}
 PORTS_DIR = 'Data/ports'
-AUTOINSTALL_DIR = 'Data/ports/autoinstall'
+# PortMaster đọc 2 thư mục autoinstall; thư mục trong Data/ports dùng $directory="mnt/SDCARD/Data" (thiếu / đầu)
+# nên chọn thư mục của chính PortMaster (đường dẫn tuyệt đối, luôn có).
+PORTMASTER_DIR = 'Apps/PortMaster/PortMaster'
+AUTOINSTALL_DIR = PORTMASTER_DIR + '/autoinstall'
 ROOTED_TOPS = ('Roms','Imgs','Data')
+# Thư mục người dùng chép game vào (gốc thẻ). Thư mục đầu là thư mục chính, các thư mục sau vẫn được đọc.
+PACKAGE_DIRS = ('CHEP_GAME_VAO_DAY', 'GamePackages')
+README_NAME = 'HUONG_DAN.txt'
+README_TEXT = '''CHÉP GAME VÀO ĐÂY — Xiaozhi AI tự nhận diện và cài vào đúng chỗ
+================================================================
+
+1. Cắm thẻ nhớ vào máy tính. Mở thư mục này (CHEP_GAME_VAO_DAY, nằm ngoài cùng thẻ).
+2. Chép game vào đây. Dạng nào cũng được:
+     - file nén .zip hoặc .7z (không cần giải nén)
+     - thư mục game đã giải nén
+     - file ROM lẻ (.gba, .sfc, .n64, .nds ...)
+     - gói port PortMaster (.zip có file .sh và thư mục port)
+     - dữ liệu game cho port (ví dụ file .pck/.exe của game mua trên Steam, itch.io)
+3. Cắm thẻ lại máy. Mở app Xiaozhi AI, bấm R1 để sang tab "Cài gói game".
+4. Chọn gói bằng phím lên/xuống, bấm A để xem trước, bấm A lần nữa để cài.
+   - App tự biết game của máy nào. Chưa nhận ra thì AI (Gemini) chọn giúp.
+   - Game port: cài gói port trước, mở app PortMaster cho nó cài xong,
+     rồi mới cài gói dữ liệu game.
+5. Cài xong bấm X để xoá gói gốc trong thư mục này cho đỡ tốn chỗ.
+
+App không ghi đè game đang có và không tự chạy game.
+'''
+
+
+def package_folders(root=Path('/mnt/SDCARD')):
+    """Tạo thư mục chép game (kèm hướng dẫn) nếu chưa có; trả các thư mục gói đang có trên thẻ."""
+    root=Path(root);main=root/PACKAGE_DIRS[0]
+    try:
+        main.mkdir(exist_ok=True)
+        if not (main/README_NAME).exists():(main/README_NAME).write_text(README_TEXT,encoding='utf-8')
+    except OSError:pass
+    return [root/d for d in PACKAGE_DIRS if (root/d).is_dir()]
+
+
+def list_packages(root=Path('/mnt/SDCARD')):
+    """Các gói người dùng đã chép (bỏ file hướng dẫn, file/thư mục ẩn)."""
+    out=[]
+    for folder in package_folders(root):
+        for p in folder.iterdir():
+            if p.is_symlink() or p.name.startswith(('.','_')) or p.name==README_NAME:continue
+            out.append(p)
+    return sorted(out,key=lambda p:p.name.casefold())
 # Đuôi file dữ liệu game hay được script port nhắc tới (dùng để đối chiếu gói với port).
 DATA_EXT = ('exe','dll','pck','win','apk','data','pak','wad','bin','dat','assets','resource','json','xnb',
             'unx','ios','droid','zip','gma','big','rpa','rgssad','rgss3a','arc','pk3','grp','mpq','cfg','ini')
@@ -57,6 +108,18 @@ WEAK = re.compile(r'^(system|mono|microsoft|mscorlib|fna|sdl2|steam_api|libsteam
 
 def _norm(text):
     return re.sub(r'[^a-z0-9]','',text.casefold())
+
+
+# Từ chung trong tên gói/thư mục, không nói lên đó là game nào
+GENERIC_LABELS = {'game','games','data','gamedata','files','steam','linux','windows','win','itch','itchio','gog','port','ports',
+                  'portmaster','full','demo','setup','install','content','assets','release','version','english','viethoa'}
+
+
+def _name_match(directory,title,labels):
+    """Tên port (thư mục hoặc tiêu đề) có nằm trong tên gói/thư mục gốc của gói không."""
+    keys={k for k in (_norm(directory),_norm(title)) if len(k)>=4 and k not in GENERIC_LABELS}
+    labels={l for l in labels if l not in GENERIC_LABELS}
+    return any(k in l or (len(l)>=6 and l in k) for k in keys for l in labels)
 # Tên chung chung, không dùng làm bằng chứng nhận diện game.
 GENERIC = {'port.json','gameinfo.xml','config.json','settings.json','options.ini','config.ini','log.txt',
            'control.txt','data.zip','game.zip','libs.zip','patch.zip','mono.dll','mscorlib.dll'}
@@ -229,7 +292,9 @@ def systems(root):
     for p in (root/'Emus').glob('*/config.json'):
         try:
             data=json.loads(p.read_text(encoding='utf-8-sig'));rom=(p.parent/data['rompath']).resolve()
-            if rom.parent==root/'Roms' and rom.is_dir():result[rom.name]=set(data.get('extlist','').lower().split('|'))
+            # Không khai báo extlist (N64, NDS, PPSSPP, DC...) = MainUI nhận mọi file → None
+            ext=data.get('extlist')
+            if rom.parent==root/'Roms' and rom.is_dir():result[rom.name]=set(ext.lower().split('|')) if ext else None
         except (OSError,ValueError,KeyError,TypeError):continue
     return result
 
@@ -244,20 +309,47 @@ def installed_ports(root):
         if directory in ('autoinstall','images','videos'):continue
         try:data=json.loads(pj.read_text(encoding='utf-8-sig'))
         except (OSError,ValueError):continue
-        attr=data.get('attr') or {}
-        refs=set();uses_gamedata=(pj.parent/'gamedata').is_dir()
-        scripts=[base/i for i in data.get('items') or [] if isinstance(i,str) and i.endswith('.sh')]
-        for script in scripts:
-            try:text=script.read_text(encoding='utf-8',errors='replace')
-            except OSError:continue
-            if 'gamedata' in text:uses_gamedata=True
-            for m in SCRIPT_REF.finditer(text):
-                name=m.group(0).strip().casefold()
-                if name not in GENERIC and '$' not in name:refs.add(name)
-            for m in re.finditer(r'gameassembly="?([^"\s]+)',text):refs.add(m.group(1).casefold())
-        ports[directory]={'title':attr.get('title') or directory,'inst':(attr.get('inst') or '')[:1500],
-                          'refs':refs,'gamedata':uses_gamedata,'availability':attr.get('availability','')}
+        texts=[]
+        for i in data.get('items') or []:
+            if isinstance(i,str) and i.endswith('.sh'):
+                try:texts.append((base/i).read_text(encoding='utf-8',errors='replace'))
+                except OSError:pass
+        ports[directory]=_port_info(directory,data,texts,(pj.parent/'gamedata').is_dir())
     return ports
+
+
+def _port_info(directory,data,script_texts,has_gamedata=False):
+    """Thông tin nhận diện của một port từ port.json + nội dung script .sh của nó."""
+    attr=data.get('attr') or {}
+    refs=set();uses_gamedata=has_gamedata
+    for text in script_texts:
+        if 'gamedata' in text:uses_gamedata=True
+        for m in SCRIPT_REF.finditer(text):
+            name=m.group(0).strip().casefold()
+            if name not in GENERIC and '$' not in name:refs.add(name)
+        for m in re.finditer(r'gameassembly="?([^"\s]+)',text):refs.add(m.group(1).casefold())
+    return {'title':attr.get('title') or directory,'inst':(attr.get('inst') or '')[:1500],
+            'refs':refs,'gamedata':uses_gamedata,'availability':attr.get('availability','')}
+
+
+def pending_ports(root,exclude=None,sevenzip=None):
+    """Gói port PortMaster đã chép vào thẻ nhưng CHƯA cài (trong thư mục chép game hoặc autoinstall).
+    Dùng để báo người mới: gói dữ liệu này thuộc port nào và phải cài port trước."""
+    root=Path(root);found={}
+    candidates=list_packages(root)
+    auto=root/AUTOINSTALL_DIR
+    if auto.is_dir():candidates+=sorted(auto.glob('*.zip'))
+    for p in candidates:
+        if exclude and p.absolute()==Path(exclude).absolute():continue
+        try:
+            pkg=Package(p,sevenzip);pm=_portmaster_dir(pkg.entries)
+            if not pm or (root/PORTS_DIR/pm/'port.json').exists():continue
+            data=json.loads(pkg.read(pm+'/port.json').decode('utf-8-sig'))
+            texts=[pkg.read(e.name,512*1024).decode('utf-8','replace') for e in pkg.entries if '/' not in e.name and e.name.endswith('.sh')]
+            info=_port_info(pm,data,texts);info['package']=p.name;info['in_autoinstall']=p.parent==auto
+            found[pm]=info
+        except (OSError,ValueError,KeyError):continue
+    return found
 
 
 def _portmaster_dir(files):
@@ -282,15 +374,13 @@ def _match_port(files,ports,label='',name_only=False):
     for directory,info in ports.items():
         hits=[n for n in info['refs'] if n in names]
         strong=[n for n in hits if not WEAK.match(n)]
-        keys={k for k in (_norm(directory),_norm(info['title'])) if len(k)>=4}
-        named=any(k in l or (len(l)>=4 and l in k) for k in keys for l in labels)
+        named=_name_match(directory,info['title'],labels)
         score=len(strong)+(2 if named and hits else 0)
         if score:scores.append((score,directory,hits))
     if not scores:
         if not name_only:return None
         # Không port nào có file khớp script (port cài tay/thiếu script): chỉ nhận khi đúng 1 port trùng tên gói
-        named_only=[d for d,info in ports.items()
-                    if any(k in l or (len(l)>=4 and l in k) for k in {k for k in (_norm(d),_norm(info['title'])) if len(k)>=4} for l in labels)]
+        named_only=[d for d,info in ports.items() if _name_match(d,info['title'],labels)]
         if len(named_only)!=1:return None
         tops={e.name.split('/')[0] for e in files}
         prefix=tops.pop()+'/' if len(tops)==1 and all('/' in e.name for e in files) else ''
@@ -339,6 +429,10 @@ def preview(path,root=Path('/mnt/SDCARD'),system=None,sevenzip=None):
         certainty='Gói đã sắp sẵn theo thư mục thẻ'
     elif pm_dir:
         kind='portmaster';title=pm_dir
+        if not (root/PORTMASTER_DIR).is_dir():
+            raise ValueError('Đây là gói port PortMaster nhưng máy chưa cài app PortMaster. Cài PortMaster trước rồi quay lại.')
+        try:title=(json.loads(pkg.read(pm_dir+'/port.json').decode('utf-8-sig')).get('attr') or {}).get('title') or pm_dir
+        except (KeyError,ValueError):pass
         name=(pkg.path.stem if pkg.kind!='file' else pm_dir)+'.zip'
         items=[{'source':None,'target':AUTOINSTALL_DIR+'/'+name,'size':pkg.path.stat().st_size if pkg.kind=='zip' else None,
                 'pack_zip':pkg.kind!='zip','copy_archive':pkg.kind=='zip'}]
@@ -361,7 +455,7 @@ def preview(path,root=Path('/mnt/SDCARD'),system=None,sevenzip=None):
                 # Đuôi file chỉ một emulator trên thẻ nhận (theo extlist của Emus/*/config.json)
                 exts={Path(e.name).suffix.lower().lstrip('.') for e in files}-{'zip','7z','txt','md','pdf','jpg','png','nfo','url','ini','cfg','json','xml'}
                 if exts:
-                    owners={k for k,v in available.items() if k!='PORTS' and exts<=v}
+                    owners={k for k,v in available.items() if k!='PORTS' and v is not None and exts<=v}
                     if len(owners)==1:system=owners.pop()
             if not system:
                 # Không phải ROM nhận ra được: thử khớp port theo tên gói (port không có script để đối chiếu)
@@ -371,6 +465,15 @@ def preview(path,root=Path('/mnt/SDCARD'),system=None,sevenzip=None):
                     kind='port_data';title=info['title'];items=_port_data_items(files,port_dir,prefix,info)
                     certainty='Tên gói trùng tên game đã cài: '+title
             if kind=='rom' and system not in available:
+                # Dữ liệu game của một port mà người dùng đã chép vào nhưng CHƯA cài: chỉ cách cho người mới
+                waiting=pending_ports(root,exclude=pkg.path,sevenzip=pkg.sevenzip)
+                match=_match_port(files,waiting,pkg.path.name)
+                if match:
+                    info=waiting[match[0]]
+                    step=('Mở app PortMaster để nó cài port xong' if info['in_autoinstall'] else
+                          'Cài gói "%s" trước (chọn gói đó, bấm A), rồi mở app PortMaster để nó cài port'%info['package'])
+                    raise ValueError('Đây là dữ liệu game của %s, nhưng port %s chưa được cài. %s, sau đó quay lại cài gói này.'
+                                     %(info['title'],info['title'],step))
                 choices=sorted(k for k in available if k!='PORTS')+['port:'+d for d in sorted(ports)]
                 return {'source':str(pkg.path),'needs_system':True,'systems':choices,
                         'labels':{**{k:system_label(k) for k in available},**{'port:'+d:'PORT: '+ports[d]['title'] for d in ports}},
@@ -382,10 +485,13 @@ def preview(path,root=Path('/mnt/SDCARD'),system=None,sevenzip=None):
             else:
                 for e in files:
                     suffix=Path(e.name).suffix.lower().lstrip('.')
-                    if suffix not in available[system]:continue
+                    accepted=available[system]
+                    if (suffix not in accepted) if accepted is not None else (suffix in JUNK_EXT or suffix in ('zip','7z')):continue
                     items.append({'source':e.name,'target':'Roms/'+system+'/'+PurePosixPath(e.name).name,'size':e.size})
     def allowed(target):
         parts=PurePosixPath(safe_name(target)).parts
+        if PurePosixPath(target).parent.as_posix()==AUTOINSTALL_DIR and target.endswith('.zip') and kind=='portmaster':
+            destination(root,target);return
         if len(parts)<3 or parts[0] not in ROOTED_TOPS:raise ValueError('Gói yêu cầu ghi ngoài thư mục game.')
         if parts[0] in ('Roms','Imgs') and parts[1] not in available:raise ValueError('Hệ máy/emulator đích chưa có trên thẻ: '+parts[1])
         if parts[0]=='Data' and (parts[1]!='ports' or len(parts)<4):raise ValueError('Chỉ ghi được vào Data/ports/<game>/.')
@@ -545,8 +651,9 @@ def _download(item,f,cancel):
 
 
 def remove_source(path,root=Path('/mnt/SDCARD')):
-    """Xoá gói gốc sau khi cài (người dùng bấm xác nhận). Chỉ xoá trong GamePackages."""
-    path=Path(path).absolute();folder=(Path(root)/'GamePackages').resolve()
-    if path.is_symlink() or path.resolve().parent!=folder:raise ValueError('Chỉ xoá gói nằm trong GamePackages.')
+    """Xoá gói gốc sau khi cài (người dùng bấm xác nhận). Chỉ xoá trong thư mục chép game."""
+    path=Path(path).absolute();folders={(Path(root)/d).resolve() for d in PACKAGE_DIRS}
+    if path.is_symlink() or path.resolve().parent not in folders or path.name==README_NAME:
+        raise ValueError('Chỉ xoá gói nằm trong thư mục %s.'%PACKAGE_DIRS[0])
     if path.is_dir():shutil.rmtree(path)
     else:path.unlink()
