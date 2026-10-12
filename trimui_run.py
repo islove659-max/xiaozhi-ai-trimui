@@ -418,6 +418,8 @@ def button_reader(loop, container, controller, stop_flag):
                 if code in (BTN_L1, BTN_R1):
                     if code == BTN_R1 and not controller.packages.active:
                         controller.package_future = asyncio.run_coroutine_threadsafe(controller.open_packages(), loop)
+                    elif code == BTN_R1:   # trong tab Cài gói game: R1 = lịch sử cài đặt ↔ danh sách
+                        controller.package_future = asyncio.run_coroutine_threadsafe(controller.packages.handle(code), loop)
                     elif code == BTN_L1 and controller.packages.active:
                         controller.package_future = asyncio.run_coroutine_threadsafe(controller.packages.leave(), loop)
                     continue

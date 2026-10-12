@@ -235,13 +235,13 @@ class PackageUI:
         await self.show({'status': 'Chọn gói để xem trước', 'rows': [self._row(p) for p in self.entries],
                          'selected': self.index,
                          'empty': ('Đã cài xong tất cả gói trong thư mục. Chép thêm game vào ' + PACKAGE_DIRS[0] + ' rồi mở lại tab này, '
-                                   'hoặc bấm R2 để xem lịch sử cài đặt.') if self.n_done else (
+                                   'hoặc bấm R1 để xem lịch sử cài đặt.') if self.n_done else (
                                   'Chưa có game nào để cài. Cách chép: cắm thẻ nhớ vào máy tính → mở thư mục '
                                   + PACKAGE_DIRS[0] + ' (ngoài cùng thẻ) → chép game vào (zip, 7z, thư mục hoặc file ROM) '
                                   '→ cắm thẻ lại máy → mở lại tab này.'),
                          'hint': 'Chép game vào thư mục ' + PACKAGE_DIRS[0] + ' ở ngoài cùng thẻ nhớ (có file HUONG_DAN.txt)',
                          'controls': [('A', 'AI tự cài gói này'), ('START', 'AI cài tất cả'), ('X', 'Xem trước'),
-                                      ('Y', 'Hỏi AI'), ('R2', 'Lịch sử cài đặt (%d)' % self.n_done), ('B', 'Về Trợ lý AI')]})
+                                      ('Y', 'Hỏi AI'), ('R1', 'Lịch sử cài đặt (%d)' % self.n_done), ('B', 'Về Trợ lý AI')]})
 
     # ---------- xem trước ----------
     async def read_plan(self, system=None):
@@ -351,7 +351,7 @@ class PackageUI:
             sample = [posixpath.relpath(r, where) for r in result[:3]] + (['… và %d file khác' % (len(result) - 3)] if len(result) > 3 else [])
             await self.show({'status': 'Đã cài xong', 'table': [('Gói', name), ('Đã chép', '%d file' % len(result)), ('Vị trí', '/' + where)],
                              'lines': sample + extra + [tail],
-                             'controls': [('B', 'Danh sách gói'), ('R2', 'Lịch sử cài đặt')]})
+                             'controls': [('B', 'Danh sách gói'), ('R1', 'Lịch sử cài đặt')]})
         except Exception as exc:
             self.installed_sources = []
             await self.show({'status': 'Không cài được gói', 'tone': 'error', 'table': [('Gói', name)],
@@ -375,7 +375,8 @@ class PackageUI:
         await self.show({'status': 'Lịch sử cài đặt', 'rows': rows, 'selected': self.hist_index,
                          'empty': 'Chưa cài gói nào.',
                          'hint': 'Các gói gốc vẫn còn nguyên trong thư mục ' + PACKAGE_DIRS[0] + ', app không tự xoá',
-                         'controls': [('B', 'Danh sách gói')]})
+                         'controls': [('R1', 'Về danh sách gói'), ('Lên/Xuống', 'Cuộn')]})
+
     # ---------- AI ----------
     async def ask_ai(self):
         if not self.entries:
@@ -513,14 +514,14 @@ class PackageUI:
                 entry, ok, lines, _ = done[0]
                 await self.show({'status': 'AI đã cài xong' if ok else 'AI chưa cài được gói này',
                                  'tone': None if ok else 'warn', 'table': [('Gói', entry.name)], 'lines': lines,
-                                 'controls': [('B', 'Danh sách gói'), ('R2', 'Lịch sử cài đặt')]})
+                                 'controls': [('B', 'Danh sách gói'), ('R1', 'Lịch sử cài đặt')]})
             else:
                 lines = []
                 for entry, ok, msg, _ in done:
                     lines.append(('✓ ' if ok else '✗ ') + entry.name + ' — ' + msg[0])
                 await self.show({'status': 'AI đã cài %d/%d gói' % (ok_n, len(entries)), 'tone': None if ok_n == len(entries) else 'warn',
                                  'lines': lines, 'scroll': 0,
-                                 'controls': [('Lên/Xuống', 'Cuộn'), ('B', 'Danh sách gói'), ('R2', 'Lịch sử cài đặt')]})
+                                 'controls': [('Lên/Xuống', 'Cuộn'), ('B', 'Danh sách gói'), ('R1', 'Lịch sử cài đặt')]})
         finally:
             self.busy = False
             self.page = 'result'
@@ -582,9 +583,11 @@ class PackageUI:
                 await self.read_plan(self.plan['systems'][self.system_index])
             elif self.page == 'preview':
                 await self.do_install()
-        elif code == 313:   # R2: lịch sử cài đặt
+        elif code in (311, 313):   # R1 (hoặc R2 nếu máy có): lịch sử cài đặt ↔ danh sách
             if self.page in ('list', 'result'):
                 await self.history_page()
+            elif self.page == 'history':
+                await self.open()
         elif code == 315:   # START
             if self.page == 'list':
                 await self.auto_all()

@@ -83,12 +83,13 @@ async def main():
         left = [p.name for p in ui2.entries]
         check('installed packages leave the main list after reopening', 'Du lieu Steam' not in left and 'Zeta Game (PortMaster).zip' not in left and 'Mario.zip' in left)
         check('source packages are NOT deleted', (folder / 'Du lieu Steam').exists() and (folder / 'Zeta Game (PortMaster).zip').exists())
-        await ui2.handle(313)   # R2: lịch sử cài đặt
+        await ui2.handle(311)   # R1: lịch sử cài đặt (máy không có phím R2)
         hist = {r[1] for r in ui2.state['rows']}
         check('history lists installed packages', ui2.state['status'] == 'Lịch sử cài đặt' and hist == {'Du lieu Steam', 'Zeta Game (PortMaster).zip'})
         check('no delete option anywhere in history', all(k != 'X' for k, _ in ui2.state['controls']))
-        await ui2.handle(304)   # B: về danh sách
-        check('back from history returns to list', ui2.page == 'list')        # Tất cả: ROM tự nhận, gói lạ AI không chắc → bỏ qua và báo lý do
+        check('history page offers R1 to go back', ('R1', 'Về danh sách gói') in ui2.state['controls'])
+        await ui2.handle(311)   # R1 lần nữa: về danh sách
+        check('R1 again returns to list', ui2.page == 'list')        # Tất cả: ROM tự nhận, gói lạ AI không chắc → bỏ qua và báo lý do
         await ui.open()
         await ui.auto_all()
         last = bus.states[-1]
