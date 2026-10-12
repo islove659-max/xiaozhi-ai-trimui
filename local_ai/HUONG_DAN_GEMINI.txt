@@ -7,7 +7,7 @@ mà Wikipedia không có. Câu hỏi thường vẫn trả lời từ tài liệ
 1. TẠO KEY (miễn phí)
    - Trên điện thoại hoặc máy tính, vào: https://aistudio.google.com/apikey
    - Đăng nhập tài khoản Google, bấm "Create API key".
-   - Chép đoạn key (bắt đầu bằng "AIza...").
+   - Chép đoạn key (key cũ bắt đầu bằng "AIza...", key mới có thể khác — cứ chép nguyên đoạn).
 
 2. ĐƯA KEY VÀO MÁY
    - Tạo file văn bản tên đúng là:  gemini_key.txt
@@ -17,6 +17,8 @@ mà Wikipedia không có. Câu hỏi thường vẫn trả lời từ tài liệ
    - Cách chép: cắm thẻ nhớ vào máy tính, hoặc dùng FileManager/USB.
 
 3. DÙNG THỬ
+   - Tab Cài gói game (bấm R1): chọn gói rồi bấm Y để AI phân tích; gói app chưa nhận ra
+     sẽ được AI tự chọn nơi cài (bạn vẫn xem trước và bấm A mới cài).
    - Mở Xiaozhi AI, bấm Y để chuyển sang chế độ Cục bộ & Web.
    - Hỏi một câu vui, ví dụ: "nếu chó biết nói thì nó sẽ nói gì".
    - Trên màn hình, nguồn trả lời sẽ ghi: "Gemini (Google AI)".
