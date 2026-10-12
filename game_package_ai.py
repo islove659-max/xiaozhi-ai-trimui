@@ -6,6 +6,17 @@ import urllib.error
 from pathlib import Path
 from game_packages import Package, MANIFEST, systems, installed_ports, _match_port, _portmaster_dir, destination
 
+GUIDE = Path(__file__).resolve().parent / 'local_ai' / 'HUONG_DAN_CAI_GAME_CHO_AI.md'
+
+
+def install_guide():
+    """Kiến thức cài game đã kiểm chứng trên máy (nhà phát triển viết) — gửi kèm mọi câu hỏi cài game cho AI."""
+    try:
+        return GUIDE.read_text(encoding='utf-8')[:6000]
+    except OSError:
+        return ''
+
+
 SECRET = re.compile(r'(?:(?:api|gemini)[_ -]?key|token|password|passwd|secret|private[_ -]?key|authorization)',re.I)
 
 def snapshot(path,root=Path('/mnt/SDCARD'),sevenzip=None):
@@ -59,7 +70,11 @@ def validate_advice(data,evidence):
 
 
 def _gemini_json(prompt):
-    """Gọi Gemini bằng key riêng của người dùng, đòi kết quả JSON. Trả dict hoặc ném ValueError dễ hiểu."""
+    """Gọi Gemini bằng key riêng của người dùng, đòi kết quả JSON. Trả dict hoặc ném ValueError dễ hiểu.
+    Hướng dẫn cài game của máy được đặt trước câu hỏi để AI làm đúng theo thực tế thiết bị."""
+    guide = install_guide()
+    if guide:
+        prompt = '=== HƯỚNG DẪN CÀI GAME CỦA MÁY (đáng tin) ===\n' + guide + '\n=== YÊU CẦU ===\n' + prompt
     from local_ai.knowledge_engine import InternetKnowledge
     from src.utils.tls import client_ssl_context
     key=InternetKnowledge._gemini_key()

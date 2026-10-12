@@ -64,7 +64,7 @@ async def main():
     await ui.open()
     names = [p.name for p in ui.entries]
     check('package list from CHEP_GAME_VAO_DAY', names == ['Bi an.zip', 'Du lieu Steam', 'Mario.zip', 'Zeta Game (PortMaster).zip'])
-    with patch.object(tp, 'install_port_now', fake_portmaster), \
+    with patch.object(tp, 'ensure_runtimes', lambda *a: []), \
          patch.object(gpa, 'suggest_target', lambda *a: (None, 'Tên file quá chung chung.')):
         # Một gói: dữ liệu game mà port còn nằm trong thư mục → tự cài port trước
         ui.index = names.index('Du lieu Steam')

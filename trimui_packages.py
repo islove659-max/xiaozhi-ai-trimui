@@ -11,7 +11,8 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont
 from game_packages import (preview, install, remove_source, system_label, list_packages, PACKAGE_DIRS,
-                           waiting_port_for, install_port_now, check_port_data, is_portmaster_package)
+                           waiting_port_for, ensure_runtimes, check_port_data, is_portmaster_package,
+                           refresh_game_list)
 
 KIND_LABEL = {'rom': 'ROM', 'rooted': 'Gói sắp sẵn theo thư mục thẻ', 'portmaster': 'Port PortMaster',
               'port_data': 'Dữ liệu game cho port đã cài'}
@@ -316,16 +317,20 @@ class PackageUI:
 
             kind, source = self.plan['kind'], self.plan['source']
             result = await self.run(install, self.plan, self.cancel, progress, True)
+            await self.run(refresh_game_list, result, self.root)
+            extra = []
+            if kind == 'portmaster':
+                extra = await self.run(ensure_runtimes, self.plan['port_dir'], self.root, progress, self.cancel)
             self.installed_sources = [Path(source)]
-            tail = {'portmaster': 'Bước tiếp: thoát app (MENU), mở app PortMaster — nó tự cài port. Nếu game cần dữ liệu riêng '
-                                  '(bản mua trên Steam/itch.io), quay lại đây cài gói dữ liệu sau khi port đã cài xong.',
+            tail = {'portmaster': 'Port đã có trong menu Ports. Nếu game cần dữ liệu riêng (bản mua trên Steam/itch.io), '
+                                  'chép gói dữ liệu vào thư mục ' + PACKAGE_DIRS[0] + ' rồi cài ở đây.',
                     'port_data': 'Mở game trong mục Ports. Lần đầu port có thể mất vài phút xử lý dữ liệu.'}.get(
                 kind, 'Về menu game, làm mới danh sách để thấy game mới.')
             import posixpath
             where = posixpath.commonpath(result) if len(result) > 1 else posixpath.dirname(result[0])
             sample = [posixpath.relpath(r, where) for r in result[:3]] + (['… và %d file khác' % (len(result) - 3)] if len(result) > 3 else [])
             await self.show({'status': 'Đã cài xong', 'table': [('Gói', name), ('Đã chép', '%d file' % len(result)), ('Vị trí', '/' + where)],
-                             'lines': sample + [tail],
+                             'lines': sample + extra + [tail],
                              'controls': [('X', 'Xoá gói gốc'), ('B', 'Danh sách gói')]})
         except Exception as exc:
             self.installed_sources = []
@@ -412,11 +417,15 @@ class PackageUI:
             lines.append('AI chọn %s: %s' % (plan.get('labels', {}).get(choice, choice), why))
             plan = preview(entry, self.root, choice)
         kind = plan['kind']
-        if kind == 'portmaster' and any(n.startswith('Port này đã cài') for n in plan.get('notes', [])):
+        if kind == 'portmaster' and 'Port này đã cài sẵn.' in plan.get('notes', []):
             return True, ['Port %s đã cài sẵn trong mục Ports, bỏ qua.' % (plan.get('title') or '')]
         result = install(plan, self.cancel, say, True)
+        refresh_game_list(result, self.root)
         if kind == 'portmaster':
-            lines += install_port_now(self.root / result[0], self.root, say, self.cancel)
+            lines.append('Đã cài port %s, có trong menu Ports.' % (plan.get('title') or ''))
+            lines += ensure_runtimes(plan['port_dir'], self.root, say, self.cancel)
+            lines += [n for n in plan.get('notes', []) if n.startswith('Port này cần file game gốc')]
+            return True, lines
         else:
             where = plan.get('target_dir') or ''
             lines.append('Đã chép %d file vào /%s.' % (len(result), where))

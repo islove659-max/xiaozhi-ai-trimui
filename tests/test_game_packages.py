@@ -114,14 +114,26 @@ try:
  with patch.object(gp.urllib.request,'urlopen',lambda *a,**k:Response(payload)):rejects('incorrect downloaded hash blocks all installation',lambda:gp.install(plan,allow_repairs=True))
  check('bad download leaves neither game nor partial dependency',not (root/'Roms/GBA/other.gba').exists() and not (root/'Roms/GBA/bad-download.gba').exists())
  # ---------- Port PortMaster ----------
- pm={'Demo.sh':b'#!/bin/bash\necho demo\n','demo/port.json':json.dumps({'version':4,'items':['Demo.sh','demo/']}).encode(),'demo/demo.bin':b'bin'}
+ pm={'Demo.sh':b'#!/bin/bash\necho demo\n','demo/port.json':json.dumps({'version':4,'items':['Demo.sh','demo/'],'attr':{'title':'Demo Game'}}).encode(),
+     'demo/demo.bin':b'bin','demo/cover.png':b'png'}
  p=archive('demo.zip',pm);plan=gp.preview(p,root)
- check('PortMaster zip goes to autoinstall',plan['kind']=='portmaster' and plan['items'][0]['target']=='Apps/PortMaster/PortMaster/autoinstall/demo.zip')
- gp.install(plan);check('PortMaster zip copied byte-for-byte',(root/'Apps/PortMaster/PortMaster/autoinstall/demo.zip').read_bytes()==p.read_bytes())
+ targets=sorted(i['target'] for i in plan['items'])
+ check('PortMaster package installs itself into Data/ports',plan['kind']=='portmaster' and 'Data/ports/Demo.sh' in targets and 'Data/ports/demo/port.json' in targets)
+ check('card with Emus/PORTS gets script in Roms/PORTS menu','Roms/PORTS/Demo.sh' in targets)
+ gp.install(plan)
+ check('port files and menu script installed',(root/'Data/ports/demo/demo.bin').read_bytes()==b'bin' and (root/'Roms/PORTS/Demo.sh').read_bytes()==pm['Demo.sh'])
+ check('installed port now known',gp.installed_ports(root).get('demo',{}).get('title')=='Demo Game')
+ # Thẻ kiểu TOS (không có Emus/PORTS): menu là Ports/portmaster-<tên>/config.json, icon lấy từ cover của port
+ (root/'Emus/PORTS/config.json').rename(root/'Emus/PORTS/config.off')
  plan=gp.preview(folder('Demo2',{k.replace('demo','demo2').replace('Demo','Demo2'):v for k,v in pm.items()}),root)
  gp.install(plan)
- with zipfile.ZipFile(root/'Apps/PortMaster/PortMaster/autoinstall/Demo2.zip') as z:
-  check('unpacked PortMaster folder repacked as valid zip',sorted(z.namelist())==['Demo2.sh','demo2/demo2.bin','demo2/port.json'] and z.read('demo2/demo2.bin')==b'bin')
+ conf=json.loads((root/'Ports/portmaster-demo2/config.json').read_text(encoding='utf-8'))
+ check('TOS card gets Ports/portmaster-* menu entry',conf['launch']=='/mnt/SDCARD/Data/ports/Demo2.sh' and conf['label']=='Demo Game' and (root/'Ports/portmaster-demo2/icon.png').read_bytes()==b'png')
+ (root/'Emus/PORTS/config.off').rename(root/'Emus/PORTS/config.json')
+ (root/'Roms/GB/GB_cache7.db').write_bytes(b'db')
+ check('game list cache refreshed after ROM install',gp.refresh_game_list(['Roms/GB/x.gb'],root)==['GB'] and (root/'Roms/GB/GB_cache7.db.old').exists())
+ import game_package_ai as gpa_guide
+ check('AI install guide ships with app','PortMaster' in gpa_guide.install_guide() and 'Roms/<HỆ>' in gpa_guide.install_guide())
  # ---------- Dữ liệu game cho port đã cài ----------
  data={'Celeste Linux/Celeste.exe':b'exe','Celeste Linux/Content/Maps/a.bin':b'map','Celeste Linux/FNA.dll':b'fna','readme.txt':b'top'}
  p=archive('celeste-data.zip',data);plan=gp.preview(p,root)
@@ -168,7 +180,7 @@ try:
  names=[p.name for p in gp.list_packages(root)]
  check('package list skips guide, reads both folders','HUONG_DAN.txt' not in names and 'Last Game (PortMaster).zip' in names)
  plan=gp.preview(port_zip,root)
- check('PortMaster package uses PortMaster autoinstall and real title',plan['items'][0]['target']=='Apps/PortMaster/PortMaster/autoinstall/Last Game (PortMaster).zip' and plan['title']=='The Last Game')
+ check('PortMaster package keeps real title and paid note',plan['title']=='The Last Game' and 'Data/ports/Last Game.sh' in [i['target'] for i in plan['items']])
  rejects('data for a port not yet installed explains what to install first',
   lambda:gp.preview(folder('Last Game Steam',{'Game/LastGame.pck':b'p'}),root),'Last Game (PortMaster).zip')
  import game_package_ai as gpa

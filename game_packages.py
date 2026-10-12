@@ -397,6 +397,27 @@ def _match_port(files,ports,label='',name_only=False):
     return directory,prefix,len(hits),named
 
 
+def _port_menu_items(root,pkg,scripts,pm_dir,title,attr,available):
+    """Mục menu Ports của MainUI cho port vừa cài, theo đúng kiểu thẻ:
+    có Emus/PORTS (menu đọc Roms/PORTS) → chép script vào Roms/PORTS; không có → Ports/portmaster-<tên>/config.json."""
+    items=[]
+    if 'PORTS' in available:
+        for e in scripts:items.append({'source':e.name,'target':'Roms/PORTS/'+e.name,'size':e.size})
+        return items
+    for e in scripts:
+        clean=re.sub(r'[ .]+','.',re.sub(r'[^a-z0-9 _\-.]+','',PurePosixPath(e.name).stem.strip().lower()))
+        menu='Ports/portmaster-'+clean
+        cover=next((x for x in pkg.entries if x.name in (pm_dir+'/cover.png',pm_dir+'/screenshot.png')),None)
+        conf={'package':'portmaster-'+clean,'label':title if len(scripts)==1 else PurePosixPath(e.name).stem,
+              'icontop':'icon.png' if cover else '','icon':'','themecolor':'61A8DD',
+              'launch':'/mnt/SDCARD/'+PORTS_DIR+'/'+e.name,
+              'description':' '.join((attr.get('desc') or 'Port PortMaster').split())[:200]}
+        data=(json.dumps(conf,ensure_ascii=False,indent=4)+'\n').encode()
+        items.append({'target':menu+'/config.json','data':data,'size':len(data)})
+        if cover:items.append({'source':cover.name,'target':menu+'/icon.png','size':cover.size})
+    return items
+
+
 def _port_data_items(files,directory,prefix,info):
     if prefix and not all(e.name.startswith(prefix) for e in files):
         # File nằm ngoài thư mục dữ liệu (readme, ảnh...) thì bỏ qua, không rải lung tung.
@@ -433,14 +454,18 @@ def preview(path,root=Path('/mnt/SDCARD'),system=None,sevenzip=None):
         kind='portmaster';title=pm_dir
         if not (root/PORTMASTER_DIR).is_dir():
             raise ValueError('Đây là gói port PortMaster nhưng máy chưa cài app PortMaster. Cài PortMaster trước rồi quay lại.')
-        try:title=(json.loads(pkg.read(pm_dir+'/port.json').decode('utf-8-sig')).get('attr') or {}).get('title') or pm_dir
-        except (KeyError,ValueError):pass
-        name=(pkg.path.stem if pkg.kind!='file' else pm_dir)+'.zip'
-        items=[{'source':None,'target':AUTOINSTALL_DIR+'/'+name,'size':pkg.path.stat().st_size if pkg.kind=='zip' else None,
-                'pack_zip':pkg.kind!='zip','copy_archive':pkg.kind=='zip'}]
-        if items[0]['size'] is None:items[0]['size']=sum(e.size for e in files)   # zip STORED: xấp xỉ, kiểm lại khi cài
-        certainty='Gói port PortMaster: mở app PortMaster để cài (kèm runtime nếu có Wi-Fi)'
-        if pm_dir in ports:notes.append('Port này đã cài; PortMaster sẽ cài đè bản port (không đụng gamedata).')
+        try:attr=json.loads(pkg.read(pm_dir+'/port.json').decode('utf-8-sig')).get('attr') or {}
+        except (KeyError,ValueError):attr={}
+        title=attr.get('title') or pm_dir;port_dir=pm_dir
+        # Tự cài như harbourmaster (giải nén vào Data/ports). Không gọi lệnh cài của PortMaster: bản 2026.06.23
+        # văng FileNotFoundError ở add_port_script (os.path.samefile tới Roms/PORTS/<script> chưa có) rồi treo.
+        items=[{'source':e.name,'target':PORTS_DIR+'/'+e.name,'size':e.size} for e in files]
+        scripts=[e for e in files if '/' not in e.name and e.name.endswith('.sh')]
+        items+=_port_menu_items(root,pkg,scripts,pm_dir,title,attr,available)
+        certainty='Gói port PortMaster: tự cài vào Data/ports và thêm vào menu Ports'
+        if pm_dir in ports:notes.append('Port này đã cài sẵn.')
+        if attr.get('availability')=='paid':
+            notes.append('Port này cần file game gốc (bản mua). Hướng dẫn: '+' '.join((attr.get('inst') or '').split())[:300])
     else:
         if not system:
             match=_match_port(files,ports,pkg.path.name)
@@ -492,8 +517,10 @@ def preview(path,root=Path('/mnt/SDCARD'),system=None,sevenzip=None):
                     items.append({'source':e.name,'target':'Roms/'+system+'/'+PurePosixPath(e.name).name,'size':e.size})
     def allowed(target):
         parts=PurePosixPath(safe_name(target)).parts
-        if PurePosixPath(target).parent.as_posix()==AUTOINSTALL_DIR and target.endswith('.zip') and kind=='portmaster':
-            destination(root,target);return
+        if kind=='portmaster':
+            # Port: script ở Data/ports/<Tên>.sh, thư mục port ở Data/ports/<dir>/, mục menu Ports/portmaster-<tên>/
+            if parts[:2]==('Data','ports') and len(parts)>=3:destination(root,target);return
+            if parts[0]=='Ports' and len(parts)==3 and parts[1].startswith('portmaster-'):destination(root,target);return
         if len(parts)<3 or parts[0] not in ROOTED_TOPS:raise ValueError('Gói yêu cầu ghi ngoài thư mục game.')
         if parts[0] in ('Roms','Imgs') and parts[1] not in available:raise ValueError('Hệ máy/emulator đích chưa có trên thẻ: '+parts[1])
         if parts[0]=='Data' and (parts[1]!='ports' or len(parts)<4):raise ValueError('Chỉ ghi được vào Data/ports/<game>/.')
@@ -531,7 +558,7 @@ def preview(path,root=Path('/mnt/SDCARD'),system=None,sevenzip=None):
     for x in list(allitems):
         d=destination(root,x['target'])
         if not d.exists():continue
-        if x.get('source') and d.is_file() and d.stat().st_size==x['size'] and kind in ('port_data','rooted'):
+        if x.get('source') and d.is_file() and d.stat().st_size==x['size'] and kind in ('port_data','rooted','portmaster'):
             items.remove(x);skipped+=1;continue
         conflicts.append(x['target'])
     if conflicts:
@@ -583,7 +610,7 @@ def install(plan,cancel=None,progress=None,allow_repairs=False):
     if shutil.disk_usage(root).free<2*total+32*1024**2:raise ValueError('Thẻ không đủ dung lượng cho cài đặt an toàn.')
     stage=Path(tempfile.mkdtemp(prefix='.xiaozhi-install-',dir=root));committed=[];created_dirs=[]
     try:
-        extracted=None
+        extracted=None;moved={}
         if pkg.kind=='7z' and any(x.get('source') or x.get('pack_zip') for x in entries):
             progress('Đang giải nén 7z (%d file)...'%len(pkg.entries))
             extracted=stage/'x';pkg.extract_7z(extracted,cancel)
@@ -595,7 +622,8 @@ def install(plan,cancel=None,progress=None,allow_repairs=False):
             if target.exists():raise ValueError('Đích đã tồn tại. Không ghi đè.')
             temp=stage/str(index)
             if extracted is not None and item.get('source'):
-                os.replace(extracted/item['source'],temp)
+                if item['source'] in moved:shutil.copyfile(moved[item['source']],temp)   # cùng file dùng 2 nơi (script → menu)
+                else:os.replace(extracted/item['source'],temp);moved[item['source']]=temp
             elif item.get('pack_zip'):
                 _write_zip(pkg,temp,cancel,extracted);item['size']=temp.stat().st_size
             else:
@@ -671,7 +699,9 @@ def _portmaster(root,args,timeout,cancel=None):
     env={k:v for k,v in os.environ.items() if k not in ('PYTHONPATH','PYTHONHOME')}
     import sys
     with tempfile.TemporaryFile() as out:
-        p=subprocess.Popen([sys.executable,'./harbourmaster','--quiet']+list(args),cwd=pm,env=env,stdout=out,stderr=subprocess.STDOUT)
+        # stdin trống: nếu PortMaster muốn hỏi gì thì nhận EOF ngay, không chờ phím mãi
+        p=subprocess.Popen([sys.executable,'./harbourmaster','--quiet']+list(args),cwd=pm,env=env,
+                           stdin=subprocess.DEVNULL,stdout=out,stderr=subprocess.STDOUT)
         stop=_kill_on_cancel(p,cancel,timeout)
         try:code=p.wait()
         finally:stop()
@@ -679,28 +709,40 @@ def _portmaster(root,args,timeout,cancel=None):
     return code,tail
 
 
-def install_port_now(zip_path,root=Path('/mnt/SDCARD'),progress=None,cancel=None):
-    """Cài ngay gói port PortMaster (đã chép vào autoinstall) bằng harbourmaster, rồi bảo đảm có runtime.
-    Trả danh sách dòng kết quả cho người dùng; ném ValueError nếu không cài được."""
-    root=Path(root);progress=progress or (lambda t:None);zip_path=Path(zip_path)
-    pkg=Package(zip_path);pm_dir=_portmaster_dir(pkg.entries)
-    if not pm_dir:raise ValueError('Gói không phải port PortMaster.')
-    data=json.loads(pkg.read(pm_dir+'/port.json').decode('utf-8-sig'))
-    title=(data.get('attr') or {}).get('title') or pm_dir
-    progress('PortMaster đang cài port %s...'%title)
-    code,log=_portmaster(root,['install',str(zip_path.absolute())],900,cancel)
-    if cancel and cancel.is_set():raise InterruptedError('Đã hủy cài đặt.')
-    if code!=0 or not (root/PORTS_DIR/pm_dir/'port.json').is_file():
-        raise ValueError('PortMaster không cài được port %s (mã %s). Gói giữ nguyên trong autoinstall: mở app PortMaster để thử lại.'%(title,code))
-    zip_path.unlink(missing_ok=True)   # giống autoinstall: cài xong thì xoá zip để PortMaster không cài lại
-    lines=['Đã cài port %s vào mục Ports.'%title]
-    libs=root/PORTMASTER_DIR/'libs'
-    for rt in (data.get('attr') or {}).get('runtime') or []:
-        if not isinstance(rt,str) or (libs/rt).is_file():continue
-        progress('Đang tải runtime %s (cần Wi-Fi)...'%rt)
-        _portmaster(root,['runtime_check',rt],1800,cancel)
-        lines.append(('Đã tải runtime ' if (libs/rt).is_file() else 'Chưa tải được runtime (cần Wi-Fi, game sẽ tự tải khi mở): ')+rt)
+def _online(host='github.com',port=443,timeout=4):
+    import socket
+    try:
+        with socket.create_connection((host,port),timeout=timeout):return True
+    except OSError:return False
+
+
+def ensure_runtimes(port_dir,root=Path('/mnt/SDCARD'),progress=None,cancel=None):
+    """Port vừa cài cần runtime (mono, godot...) mà máy chưa có: nhờ PortMaster tải (chỉ khi có mạng, có giới hạn thời gian).
+    Không có mạng thì báo; PortMaster sẽ tải khi mở game."""
+    root=Path(root);progress=progress or (lambda t:None)
+    try:attr=json.loads((root/PORTS_DIR/port_dir/'port.json').read_text(encoding='utf-8-sig')).get('attr') or {}
+    except (OSError,ValueError):return []
+    libs=root/PORTMASTER_DIR/'libs';lines=[]
+    need=[rt for rt in attr.get('runtime') or [] if isinstance(rt,str) and not (libs/rt).is_file()]
+    if need and not _online():
+        return ['Port cần thêm runtime: %s. Chưa có Wi-Fi nên chưa tải; bật Wi-Fi rồi mở game, PortMaster sẽ tự tải.'%', '.join(need)]
+    for rt in need:
+        progress('Đang tải runtime %s qua PortMaster...'%rt)
+        _portmaster(root,['runtime_check',rt],900,cancel)
+        lines.append(('Đã tải runtime ' if (libs/rt).is_file() else 'Chưa tải được runtime (game sẽ thử tải khi mở): ')+rt)
     return lines
+
+
+def refresh_game_list(target_dirs,root=Path('/mnt/SDCARD')):
+    """MainUI lưu danh sách game trong Roms/<HỆ>/<HỆ>_cache7.db: chép game mới mà không làm mới thì game không hiện.
+    Đổi tên cache thành .old (MainUI tự quét lại, có thể khôi phục). Trả các hệ đã làm mới."""
+    root=Path(root);done=[]
+    for d in {PurePosixPath(t).parts[:2] for t in target_dirs}:
+        if len(d)<2 or d[0]!='Roms':continue
+        for db in (root/d[0]/d[1]).glob('*_cache*.db'):
+            try:os.replace(db,db.with_name(db.name+'.old'));done.append(d[1])
+            except OSError:pass
+    return sorted(set(done))
 
 
 def check_port_data(port_dir,root=Path('/mnt/SDCARD')):
