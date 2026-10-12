@@ -3,7 +3,9 @@ import asyncio
 import threading
 from pathlib import Path
 from PIL import Image,ImageDraw,ImageFont
-from game_packages import preview,install
+from game_packages import preview,install,remove_source
+
+KIND_LABEL={'rom':'ROM','rooted':'Gói sắp sẵn theo thư mục thẻ','portmaster':'Port PortMaster (cài qua app PortMaster)','port_data':'Dữ liệu game cho port đã cài'}
 
 
 def render_packages(width,height,state):
@@ -33,16 +35,17 @@ class PackageUI:
     def __init__(self,bus,root=Path('/mnt/SDCARD')):
         self.bus=bus;self.root=Path(root);self.active=False;self.busy=False
         self.entries=[];self.index=0;self.plan=None;self.page='list';self.state={};self.cancel=threading.Event()
+        self.installed_source=None
     async def show(self,status,lines=None,controls='',scroll=0):
         self.state={'status':status,'lines':lines or [],'controls':controls,'scroll':scroll}
         await self.bus.emit('trimui_packages',self.state)
     async def open(self):
         self.active=True;self.page='list';self.plan=None
         folder=self.root/'GamePackages';folder.mkdir(exist_ok=True)
-        self.entries=sorted([p for p in folder.iterdir() if not p.is_symlink() and (p.is_dir() or p.suffix.lower() in ('.zip','.7z'))],key=lambda p:p.name.casefold())
+        self.entries=sorted([p for p in folder.iterdir() if not p.is_symlink() and not p.name.startswith('.')],key=lambda p:p.name.casefold())
         self.index=min(self.index,max(0,len(self.entries)-1));await self.list_page()
     async def list_page(self):
-        lines=['Chép ZIP, 7z hoặc thư mục vào GamePackages trên thẻ.']
+        lines=['Chép ZIP, 7z, thư mục game hoặc file ROM vào GamePackages trên thẻ.']
         start=max(0,self.index-3)
         lines.extend(('> ' if i==self.index else '  ')+p.name for i,p in enumerate(self.entries) if start<=i<start+9)
         if not self.entries:lines.append('Chưa có gói game.')
@@ -56,21 +59,23 @@ class PackageUI:
             if self.plan.get('needs_system'):
                 self.page='systems';self.system_index=0;await self.system_page();return
             self.page='preview'
-            plan=self.plan;lines=[Path(plan['source']).name,plan['certainty'],
+            plan=self.plan;lines=[Path(plan['source']).name,'Loại: '+KIND_LABEL.get(plan['kind'],plan['kind'])+(' — '+plan['title'] if plan.get('title') else ''),plan['certainty'],
                 'Dung lượng: %.1f MiB'%(plan['bytes']/1024**2),
-                'Đích: '+', '.join(sorted({str(Path(x['target']).parent) for x in plan['items']}))]
+                'Đích: '+(plan.get('target_dir') or 'gốc thẻ')+'/  (%d file)'%(len(plan['items'])+len(plan['repairs']))]
             if plan['repairs']:
                 lines.append('Cần bổ sung theo khai báo:')
                 lines.extend(('Tải HTTPS: ' if 'url' in x else 'Tạo file: ')+x['target'] for x in plan['repairs'])
+            lines.extend(plan.get('notes',[]))
             lines.append('Không ghi đè game có sẵn. Chỉ cài file, không tự chạy game.')
-            await self.show('XEM TRƯỚC — CHƯA CÀI',lines,'A: xác nhận tải/tạo và cài | X: hỏi Gemini | B: quay lại')
+            await self.show('XEM TRƯỚC — CHƯA CÀI',lines,('A: xác nhận tải/tạo và cài' if plan['repairs'] else 'A: cài')+' | X: hỏi Gemini | B: quay lại')
         except Exception as exc:
             self.plan=None;self.page='blocked'
             await self.show('Chưa thể cài gói',[str(exc)],'X: Gemini phân tích tên file/config | B: quay lại')
         finally:self.busy=False
     async def system_page(self):
         choices=self.plan['systems'];start=max(0,self.system_index-3)
-        await self.show('Chọn hệ máy của gói',[self.plan['reason']]+[('> ' if i==self.system_index else '  ')+n for i,n in enumerate(choices) if start<=i<start+10],'A: chọn hệ và đọc lại | B: quay lại')
+        labels=self.plan.get('labels',{})
+        await self.show('Chọn hệ máy / port của gói',[self.plan['reason']]+[('> ' if i==self.system_index else '  ')+labels.get(n,n) for i,n in enumerate(choices) if start<=i<start+10],'A: chọn và đọc lại | B: quay lại')
     async def do_install(self):
         if not self.plan or self.plan.get('needs_system'):return
         self.busy=True;self.page='install';self.cancel.clear();loop=asyncio.get_running_loop()
@@ -78,9 +83,13 @@ class PackageUI:
             await self.show('Đang cài gói...',controls='B/SELECT/MENU: hủy và dọn bản tạm')
             def progress(text):
                 asyncio.run_coroutine_threadsafe(self.show(text,controls='B/SELECT/MENU: hủy'),loop)
+            kind=self.plan['kind'];source=self.plan['source']
             result=await asyncio.to_thread(install,self.plan,self.cancel,progress,True)
-            await self.show('ĐÃ CÀI FILE GAME',result[:10]+['Về menu game, làm mới danh sách để mở.','Chép đúng thư mục không đảm bảo mọi Port chạy được.'],'B: danh sách gói')
-        except Exception as exc:await self.show('Không cài được gói',[str(exc)],'B: danh sách gói')
+            self.installed_source=source
+            tail={'portmaster':'Mở app PortMaster để hoàn tất cài port (cần Wi-Fi nếu thiếu runtime).',
+                  'port_data':'Mở game trong mục Ports. Lần đầu port có thể mất vài phút xử lý dữ liệu.'}.get(kind,'Về menu game, làm mới danh sách để mở.')
+            await self.show('ĐÃ CÀI FILE GAME',['Đã chép %d file.'%len(result)]+result[:8]+[tail,'Chép đúng thư mục không đảm bảo mọi Port chạy được.'],'X: xoá gói gốc trong GamePackages | B: danh sách gói')
+        except Exception as exc:self.installed_source=None;await self.show('Không cài được gói',[str(exc)],'B: danh sách gói')
         finally:self.busy=False;self.page='result';self.plan=None
     async def ask_gemini(self):
         if not self.entries:return
@@ -119,4 +128,12 @@ class PackageUI:
             elif self.page=='preview':await self.do_install()
         elif code==308:
             if self.page=='list':await self.open()
+            elif self.page=='result':await self.remove_installed()
             else:await self.ask_gemini()
+    async def remove_installed(self):
+        if not self.installed_source:return
+        source=self.installed_source;self.installed_source=None
+        try:
+            await asyncio.to_thread(remove_source,source,self.root)
+            await self.show('Đã xoá gói gốc',[Path(source).name],'B: danh sách gói')
+        except Exception as exc:await self.show('Không xoá được gói gốc',[str(exc)],'B: danh sách gói')
