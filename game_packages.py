@@ -438,7 +438,7 @@ def preview(path,root=Path('/mnt/SDCARD'),system=None,sevenzip=None):
     files=[e for e in pkg.entries if e.name!=MANIFEST]
     system=system or (manifest or {}).get('system')
     kind='rom';port_dir=None;title=None;certainty='Nhận diện nơi cài ROM; chưa xác nhận toàn bộ yêu cầu chơi game'
-    items=[];notes=[]
+    items=[];notes=[];port_inst=None   # port_inst: hướng dẫn gốc (tiếng Anh) của port cần game bản mua
     rooted=all(e.name.split('/')[0] in ROOTED_TOPS for e in files) and not system
     pm_dir=None if (rooted or system) else _portmaster_dir(files)
     if system and system.startswith('port:'):
@@ -465,7 +465,7 @@ def preview(path,root=Path('/mnt/SDCARD'),system=None,sevenzip=None):
         certainty='Gói port PortMaster: tự cài vào Data/ports và thêm vào menu Ports'
         if pm_dir in ports:notes.append('Port này đã cài sẵn.')
         if attr.get('availability')=='paid':
-            notes.append('Port này cần file game gốc (bản mua). Hướng dẫn: '+' '.join((attr.get('inst') or '').split())[:300])
+            port_inst=' '.join((attr.get('inst') or '').split())[:600] or None
     else:
         if not system:
             match=_match_port(files,ports,pkg.path.name)
@@ -558,7 +558,7 @@ def preview(path,root=Path('/mnt/SDCARD'),system=None,sevenzip=None):
     for x in list(allitems):
         d=destination(root,x['target'])
         if not d.exists():continue
-        if x.get('source') and d.is_file() and d.stat().st_size==x['size'] and kind in ('port_data','rooted','portmaster'):
+        if x.get('source') and d.is_file() and d.stat().st_size==x['size'] and kind in ('port_data','rooted','portmaster','rom'):
             items.remove(x);skipped+=1;continue
         conflicts.append(x['target'])
     if conflicts:
@@ -573,10 +573,13 @@ def preview(path,root=Path('/mnt/SDCARD'),system=None,sevenzip=None):
         gd=root/PORTS_DIR/port_dir/('gamedata' if ports[port_dir]['gamedata'] else '')
         onboard={p.name.casefold() for p in gd.glob('*')} if gd.is_dir() else set()
         expected=sorted(n for n in ports[port_dir]['refs'] if n not in have and n not in onboard)
-        if expected:notes.append('Script port còn nhắc tới (có thể do port tự tạo): '+', '.join(expected[:6]))
+        # Chỉ giữ cho phần phân tích chi tiết; tên trong script có thể là file port tự tạo khi chạy, dễ làm người mới hiểu lầm
+        missing_hint=[n for n in expected if not n.endswith('.zip')][:6]
+    else:missing_hint=[]
     return {'source':str(pkg.path),'root':str(root),'system':system,'kind':kind,'port_dir':port_dir,'title':title,
             'items':items,'repairs':repairs,'bytes':total,'stamp':pkg.signature,'sevenzip':pkg.sevenzip,
             'certainty':certainty if not manifest else 'Đối chiếu danh sách bắt buộc của gói','notes':notes,
+            'paid':port_inst is not None,'inst':port_inst,'missing_hint':missing_hint,
             'target_dir':_common_dir([x['target'] for x in items+repairs])}
 
 

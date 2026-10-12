@@ -271,8 +271,9 @@ class PackageUI:
             if plan['repairs']:
                 lines.append('Cần bổ sung theo khai báo của gói:')
                 lines.extend(('Tải HTTPS: ' if 'url' in x else 'Tạo file: ') + x['target'] for x in plan['repairs'])
-            if plan['kind'] == 'portmaster':
-                lines.append('Sau khi chép: mở app PortMaster, port sẽ tự cài (cần Wi-Fi nếu thiếu runtime).')
+            if plan.get('paid'):
+                from game_package_ai import vi_instructions
+                lines.append('Port này không kèm game: ' + await self.run(vi_instructions, plan.get('inst')))
             lines.append('Không ghi đè file có sẵn. Chỉ chép file, không tự chạy game.')
             controls = [('A', 'Tải/tạo bổ sung và cài' if plan['repairs'] else 'Cài'), ('Y', 'Hỏi AI thêm'), ('B', 'Quay lại')]
             if self.ai_choice:
@@ -395,13 +396,15 @@ class PackageUI:
         try:
             plan = preview(entry, self.root)
         except ValueError as exc:
+            if 'đã có sẵn trên thẻ' in str(exc):   # cài lại gói đã cài: không phải lỗi
+                return True, ['Game này đã có sẵn trên máy.']
             # Dữ liệu của port đã chép nhưng chưa cài: tự cài port đó trước rồi làm lại
             waiting = waiting_port_for(entry, self.root) if depth == 0 else None
             if not waiting:
                 return False, [str(exc)]
             say('Cần cài port %s trước...' % waiting['title'])
             ok, sub = self._auto_one(waiting['path'], say, depth + 1)
-            lines += sub
+            lines += (['Đã tự cài port %s trước.' % waiting['title']] + sub[1:]) if ok else sub
             if not ok:
                 return False, lines + ['Chưa cài được port nên chưa chép dữ liệu game.']
             self.installed_sources.append(waiting['path'])
@@ -416,28 +419,35 @@ class PackageUI:
                 return False, ['AI chưa đủ căn cứ để cài: ' + why, 'Bấm X ở danh sách để xem trước và chọn tay.']
             lines.append('AI chọn %s: %s' % (plan.get('labels', {}).get(choice, choice), why))
             plan = preview(entry, self.root, choice)
-        kind = plan['kind']
+        kind, title = plan['kind'], plan.get('title') or ''
+        self.last_info = {'kind': kind, 'port_dir': plan.get('port_dir'), 'title': title, 'paid': plan.get('paid')}
         if kind == 'portmaster' and 'Port này đã cài sẵn.' in plan.get('notes', []):
-            return True, ['Port %s đã cài sẵn trong mục Ports, bỏ qua.' % (plan.get('title') or '')]
+            return True, ['Port %s đã cài sẵn trong menu Ports, bỏ qua.' % title]
         result = install(plan, self.cancel, say, True)
         refresh_game_list(result, self.root)
+        detail = ['Đã chép %d file vào /%s.' % (len(result), plan.get('target_dir') or '')]
         if kind == 'portmaster':
-            lines.append('Đã cài port %s, có trong menu Ports.' % (plan.get('title') or ''))
-            lines += ensure_runtimes(plan['port_dir'], self.root, say, self.cancel)
-            lines += [n for n in plan.get('notes', []) if n.startswith('Port này cần file game gốc')]
-            return True, lines
+            detail += ensure_runtimes(plan['port_dir'], self.root, say, self.cancel)
+            if plan.get('paid') and not self.has_game_data(plan['port_dir']):
+                from game_package_ai import vi_instructions
+                head = 'Đã cài port %s. Còn thiếu game gốc: %s' % (title, vi_instructions(plan.get('inst')))
+            else:
+                head = 'Đã cài port %s vào menu Ports, chơi được.' % title
+        elif kind == 'port_data':
+            head = 'Đã chép dữ liệu game cho %s, chơi được trong menu Ports.' % title
+        elif kind == 'rom':
+            head = 'Đã cài vào menu %s.' % system_label(plan.get('system') or '')
         else:
-            where = plan.get('target_dir') or ''
-            lines.append('Đã chép %d file vào /%s.' % (len(result), where))
-            if kind == 'port_data':
-                lines.append('Game %s đã đủ dữ liệu để mở trong mục Ports.' % (plan.get('title') or ''))
-                missing = check_port_data(plan['port_dir'], self.root)
-                if missing:
-                    lines.append('Script port còn nhắc tới (thường do port tự tạo khi chạy lần đầu): ' + ', '.join(missing[:5]))
-            elif kind == 'rom':
-                lines.append('Vào menu %s để chơi.' % system_label(plan.get('system') or ''))
-        lines += plan.get('notes', [])[:2]
-        return True, lines
+            head = 'Đã chép %d file vào đúng thư mục trên thẻ.' % len(result)
+        return True, [head] + lines + detail
+
+    def has_game_data(self, port_dir):
+        """Thư mục gamedata của port đã có file game (không tính file giữ chỗ)."""
+        gd = self.root / 'Data/ports' / str(port_dir) / 'gamedata'
+        try:
+            return any(p.is_file() and not p.name.startswith('.') for p in gd.rglob('*'))
+        except OSError:
+            return False
 
     async def _auto_run(self, entries, title):
         self.busy = True
@@ -459,11 +469,12 @@ class PackageUI:
         try:
             for entry in entries:
                 if entry in self.installed_sources:   # đã cài kèm ở bước trước (port của gói dữ liệu)
-                    done.append((entry, True, ['Đã cài ở bước trước.']))
+                    done.append((entry, True, ['Đã cài cùng gói dữ liệu game ở bước trước.'], {}))
                     continue
                 if self.cancel.is_set():
-                    done.append((entry, False, ['Đã dừng trước khi cài.']))
+                    done.append((entry, False, ['Đã dừng trước khi cài.'], {}))
                     continue
+                self.last_info = {}
                 try:
                     ok, lines = await self.run(self._auto_one, entry, say)
                 except InterruptedError:
@@ -472,17 +483,21 @@ class PackageUI:
                     ok, lines = False, [str(exc)]
                 if ok:
                     self.installed_sources.append(entry)
-                done.append((entry, ok, lines))
-            ok_n = sum(1 for _, ok, _ in done if ok)
+                done.append((entry, ok, lines, dict(self.last_info)))
+            # Port cần game bản mua: nếu trong cùng lượt đã cài dữ liệu game thì báo là đã đủ
+            for i, (entry, ok, msg, info) in enumerate(done):
+                if ok and info.get('kind') == 'portmaster' and info.get('paid') and self.has_game_data(info['port_dir']):
+                    done[i] = (entry, ok, ['Đã cài port %s và dữ liệu game, chơi được trong menu Ports.' % info['title']] + msg[1:], info)
+            ok_n = sum(1 for _, ok, _, _ in done if ok)
             if len(entries) == 1:
-                entry, ok, lines = done[0]
+                entry, ok, lines, _ = done[0]
                 await self.show({'status': 'AI đã cài xong' if ok else 'AI chưa cài được gói này',
                                  'tone': None if ok else 'warn', 'table': [('Gói', entry.name)], 'lines': lines,
                                  'controls': ([('X', 'Xoá gói gốc')] if ok else []) + [('B', 'Danh sách gói')]})
             else:
                 lines = []
-                for entry, ok, msg in done:
-                    lines.append(('✓ ' if ok else '✗ ') + entry.name + ' — ' + (msg[-1] if ok else msg[0]))
+                for entry, ok, msg, _ in done:
+                    lines.append(('✓ ' if ok else '✗ ') + entry.name + ' — ' + msg[0])
                 await self.show({'status': 'AI đã cài %d/%d gói' % (ok_n, len(entries)), 'tone': None if ok_n == len(entries) else 'warn',
                                  'lines': lines, 'scroll': 0,
                                  'controls': ([('X', 'Xoá các gói đã cài')] if ok_n else []) + [('Lên/Xuống', 'Cuộn'), ('B', 'Danh sách gói')]})

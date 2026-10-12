@@ -32,7 +32,8 @@ folder = gp.package_folders(root)[0]
 # Port "paid": gói port + gói dữ liệu riêng; chép vào theo thứ tự tên (dữ liệu đứng TRƯỚC port trong danh sách)
 with zipfile.ZipFile(folder / 'Zeta Game (PortMaster).zip', 'w') as z:
     z.writestr('Zeta Game.sh', 'cd $GAMEDIR/gamedata\n[ -f ZetaGame.pck ] && run ZetaGame.pck\n')
-    z.writestr('zeta/port.json', json.dumps({'items': ['Zeta Game.sh', 'zeta/'], 'attr': {'title': 'Zeta Game', 'runtime': []}}))
+    z.writestr('zeta/port.json', json.dumps({'items': ['Zeta Game.sh', 'zeta/'], 'attr': {'title': 'Zeta Game', 'runtime': [], 'availability': 'paid',
+                                                                                              'inst': 'Purchase the game on Steam and copy ZetaGame.pck into the gamedata folder.'}}))
 (folder / 'Du lieu Steam' / 'Zeta').mkdir(parents=True)
 (folder / 'Du lieu Steam' / 'Zeta' / 'ZetaGame.pck').write_bytes(b'pck')
 with zipfile.ZipFile(folder / 'Mario.zip', 'w') as z:
@@ -72,6 +73,9 @@ async def main():
         check('data package installs its waiting port first', (root / 'Data/ports/zeta/port.json').is_file())
         check('then data goes to gamedata', (root / 'Data/ports/zeta/gamedata/ZetaGame.pck').read_bytes() == b'pck')
         check('result screen says done', bus.states[-1]['status'] == 'AI đã cài xong')
+        check('headline is plain Vietnamese', bus.states[-1]['lines'][0] == 'Đã chép dữ liệu game cho Zeta Game, chơi được trong menu Ports.')
+        check('port auto-installed first, not reported as missing game', bus.states[-1]['lines'][1] == 'Đã tự cài port Zeta Game trước.')
+        check('no English PortMaster text on screen', not any('Purchase' in l for st in bus.states for l in st.get('lines', [])))
         check('both sources offered for removal', {p.name for p in ui.installed_sources} == {'Zeta Game (PortMaster).zip', 'Du lieu Steam'})
         await ui.handle(308)   # X: xoá gói gốc
         check('X removes installed sources', not (folder / 'Du lieu Steam').exists() and not (folder / 'Zeta Game (PortMaster).zip').exists())
