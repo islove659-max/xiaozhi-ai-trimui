@@ -12,7 +12,7 @@ from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont
 from game_packages import (preview, install, remove_source, system_label, list_packages, PACKAGE_DIRS,
                            waiting_port_for, ensure_runtimes, check_port_data, is_portmaster_package,
-                           refresh_game_list)
+                           refresh_game_list, mark_installed, installed_signatures, is_installed, history)
 
 KIND_LABEL = {'rom': 'ROM', 'rooted': 'Gói sắp sẵn theo thư mục thẻ', 'portmaster': 'Port PortMaster',
               'port_data': 'Dữ liệu game cho port đã cài'}
@@ -101,7 +101,7 @@ def render_packages(width, height, state):
             x = 56
             if tag:
                 tw = int(d.textlength(tag, font=_font(20))) + 20
-                d.rounded_rectangle((x, y + 16, x + tw, y + 46), radius=6, fill=WARN if tag in ('THƯ MỤC', 'PORT') else ACCENT)
+                d.rounded_rectangle((x, y + 16, x + tw, y + 46), radius=6, fill=(70, 120, 110) if tag == 'ĐÃ CÀI' else WARN if tag in ('THƯ MỤC', 'PORT') else ACCENT)
                 d.text((x + 10, y + 19), tag, font=_font(20), fill=BG)
                 x += tw + 16
             info_w = int(d.textlength(info, font=_font(22))) if info else 0
@@ -170,6 +170,10 @@ class PackageUI:
         self.state = {}
         self.cancel = threading.Event()
         self.installed_sources = []   # gói gốc đã cài xong, X để xoá
+        self.done_sigs = {}           # lịch sử gói đã cài (nhớ qua các lần mở app)
+        self.n_done = 0
+        self.hist = []
+        self.hist_index = 0
         self.system_index = 0
         self.advice_back = 'list'
         self.manual_plan = None   # danh sách chọn tay khi app/AI chưa nhận ra gói
@@ -196,9 +200,21 @@ class PackageUI:
         self.active = True
         self.page = 'list'
         self.plan = None
-        self.entries = await self.run(list_packages, self.root)
+        entries = await self.run(list_packages, self.root)
+        self.done_sigs = await self.run(installed_signatures, self.root)
+        # Danh sách chính chỉ có gói CHƯA cài; gói đã cài (vẫn nằm nguyên trên thẻ) xem ở Lịch sử cài đặt
+        self.entries = [p for p in entries if not is_installed(p, self.done_sigs)]
+        self.n_done = len(entries) - len(self.entries)
         self.index = min(self.index, max(0, len(self.entries) - 1))
         await self.list_page()
+
+    def pending_entries(self):
+        return list(self.entries)
+
+    async def remember(self, paths):
+        paths = [p for p in paths if Path(p).exists()]
+        await self.run(mark_installed, paths, self.root)
+        self.done_sigs = await self.run(installed_signatures, self.root)
 
     def _row(self, p):
         if p.is_dir():
@@ -218,12 +234,14 @@ class PackageUI:
     async def list_page(self):
         await self.show({'status': 'Chọn gói để xem trước', 'rows': [self._row(p) for p in self.entries],
                          'selected': self.index,
-                         'empty': 'Chưa có game nào để cài. Cách chép: cắm thẻ nhớ vào máy tính → mở thư mục '
+                         'empty': ('Đã cài xong tất cả gói trong thư mục. Chép thêm game vào ' + PACKAGE_DIRS[0] + ' rồi mở lại tab này, '
+                                   'hoặc bấm R2 để xem lịch sử cài đặt.') if self.n_done else (
+                                  'Chưa có game nào để cài. Cách chép: cắm thẻ nhớ vào máy tính → mở thư mục '
                                   + PACKAGE_DIRS[0] + ' (ngoài cùng thẻ) → chép game vào (zip, 7z, thư mục hoặc file ROM) '
-                                  '→ cắm thẻ lại máy → mở lại tab này.',
+                                  '→ cắm thẻ lại máy → mở lại tab này.'),
                          'hint': 'Chép game vào thư mục ' + PACKAGE_DIRS[0] + ' ở ngoài cùng thẻ nhớ (có file HUONG_DAN.txt)',
                          'controls': [('A', 'AI tự cài gói này'), ('START', 'AI cài tất cả'), ('X', 'Xem trước'),
-                                      ('Y', 'Hỏi AI'), ('B', 'Về Trợ lý AI')]})
+                                      ('Y', 'Hỏi AI'), ('R2', 'Lịch sử cài đặt (%d)' % self.n_done), ('B', 'Về Trợ lý AI')]})
 
     # ---------- xem trước ----------
     async def read_plan(self, system=None):
@@ -323,6 +341,7 @@ class PackageUI:
             if kind == 'portmaster':
                 extra = await self.run(ensure_runtimes, self.plan['port_dir'], self.root, progress, self.cancel)
             self.installed_sources = [Path(source)]
+            await self.remember(self.installed_sources)
             tail = {'portmaster': 'Port đã có trong menu Ports. Nếu game cần dữ liệu riêng (bản mua trên Steam/itch.io), '
                                   'chép gói dữ liệu vào thư mục ' + PACKAGE_DIRS[0] + ' rồi cài ở đây.',
                     'port_data': 'Mở game trong mục Ports. Lần đầu port có thể mất vài phút xử lý dữ liệu.'}.get(
@@ -332,7 +351,7 @@ class PackageUI:
             sample = [posixpath.relpath(r, where) for r in result[:3]] + (['… và %d file khác' % (len(result) - 3)] if len(result) > 3 else [])
             await self.show({'status': 'Đã cài xong', 'table': [('Gói', name), ('Đã chép', '%d file' % len(result)), ('Vị trí', '/' + where)],
                              'lines': sample + extra + [tail],
-                             'controls': [('X', 'Xoá gói gốc'), ('B', 'Danh sách gói')]})
+                             'controls': [('B', 'Danh sách gói'), ('R2', 'Lịch sử cài đặt')]})
         except Exception as exc:
             self.installed_sources = []
             await self.show({'status': 'Không cài được gói', 'tone': 'error', 'table': [('Gói', name)],
@@ -343,20 +362,20 @@ class PackageUI:
             self.page = 'result'
             self.plan = None
 
-    async def remove_installed(self):
-        sources, self.installed_sources = self.installed_sources, []
-        removed, errors = [], []
-        for source in sources:
-            if not Path(source).exists():   # zip port trong autoinstall đã được xoá sau khi cài
-                continue
-            try:
-                await self.run(remove_source, source, self.root)
-                removed.append(Path(source).name)
-            except Exception as exc:
-                errors.append('%s: %s' % (Path(source).name, exc))
-        await self.show({'status': 'Đã xoá %d gói gốc' % len(removed), 'tone': 'warn' if errors else None,
-                         'lines': removed + errors, 'controls': [('B', 'Danh sách gói')]})
-
+    # ---------- lịch sử cài đặt (chỉ xem; không xoá gói gốc) ----------
+    async def history_page(self):
+        self.page = 'history'
+        self.hist = await self.run(history, self.root)
+        self.hist_index = min(self.hist_index, max(0, len(self.hist) - 1))
+        import time
+        rows = []
+        for name, ts, present in self.hist:
+            when = time.strftime('%d/%m %H:%M', time.localtime(ts)) if ts else ''
+            rows.append(('ĐÃ CÀI', name, when))
+        await self.show({'status': 'Lịch sử cài đặt', 'rows': rows, 'selected': self.hist_index,
+                         'empty': 'Chưa cài gói nào.',
+                         'hint': 'Các gói gốc vẫn còn nguyên trong thư mục ' + PACKAGE_DIRS[0] + ', app không tự xoá',
+                         'controls': [('B', 'Danh sách gói')]})
     # ---------- AI ----------
     async def ask_ai(self):
         if not self.entries:
@@ -483,6 +502,7 @@ class PackageUI:
                     ok, lines = False, [str(exc)]
                 if ok:
                     self.installed_sources.append(entry)
+                    await self.remember(self.installed_sources)   # gồm cả port tự cài kèm
                 done.append((entry, ok, lines, dict(self.last_info)))
             # Port cần game bản mua: nếu trong cùng lượt đã cài dữ liệu game thì báo là đã đủ
             for i, (entry, ok, msg, info) in enumerate(done):
@@ -493,14 +513,14 @@ class PackageUI:
                 entry, ok, lines, _ = done[0]
                 await self.show({'status': 'AI đã cài xong' if ok else 'AI chưa cài được gói này',
                                  'tone': None if ok else 'warn', 'table': [('Gói', entry.name)], 'lines': lines,
-                                 'controls': ([('X', 'Xoá gói gốc')] if ok else []) + [('B', 'Danh sách gói')]})
+                                 'controls': [('B', 'Danh sách gói'), ('R2', 'Lịch sử cài đặt')]})
             else:
                 lines = []
                 for entry, ok, msg, _ in done:
                     lines.append(('✓ ' if ok else '✗ ') + entry.name + ' — ' + msg[0])
                 await self.show({'status': 'AI đã cài %d/%d gói' % (ok_n, len(entries)), 'tone': None if ok_n == len(entries) else 'warn',
                                  'lines': lines, 'scroll': 0,
-                                 'controls': ([('X', 'Xoá các gói đã cài')] if ok_n else []) + [('Lên/Xuống', 'Cuộn'), ('B', 'Danh sách gói')]})
+                                 'controls': [('Lên/Xuống', 'Cuộn'), ('B', 'Danh sách gói'), ('R2', 'Lịch sử cài đặt')]})
         finally:
             self.busy = False
             self.page = 'result'
@@ -514,8 +534,9 @@ class PackageUI:
         if not self.entries:
             return
         # Port trước (dữ liệu game cần port đã cài), rồi mới tới dữ liệu game và ROM
-        ports = [p for p in self.entries if await self.run(is_portmaster_package, p)]
-        rest = [p for p in self.entries if p not in ports]
+        todo = self.pending_entries()   # danh sách chính chỉ còn gói chưa cài
+        ports = [p for p in todo if await self.run(is_portmaster_package, p)]
+        rest = [p for p in todo if p not in ports]
         await self._auto_run(ports + rest, 'AI đang cài tất cả...')
 
     # ---------- phím ----------
@@ -532,6 +553,10 @@ class PackageUI:
                 n = len(self.entries)
                 self.index = max(0, min(n - 1, self.index + step)) if repeat else (self.index + step) % n
                 await self.list_page()
+            elif self.page == 'history' and self.hist:
+                n = len(self.hist)
+                self.hist_index = max(0, min(n - 1, self.hist_index + step)) if repeat else (self.hist_index + step) % n
+                await self.history_page()
             elif self.page == 'systems':
                 n = len(self.plan['systems'])
                 self.system_index = max(0, min(n - 1, self.system_index + step)) if repeat else (self.system_index + step) % n
@@ -557,6 +582,9 @@ class PackageUI:
                 await self.read_plan(self.plan['systems'][self.system_index])
             elif self.page == 'preview':
                 await self.do_install()
+        elif code == 313:   # R2: lịch sử cài đặt
+            if self.page in ('list', 'result'):
+                await self.history_page()
         elif code == 315:   # START
             if self.page == 'list':
                 await self.auto_all()
@@ -568,8 +596,6 @@ class PackageUI:
                 self.page = 'systems'
                 self.system_index = 0
                 await self.system_page()
-            elif self.page == 'result':
-                await self.remove_installed()
         elif code == 307:   # Y
             if self.page in ('list', 'preview', 'blocked', 'systems'):
                 await self.ask_ai()

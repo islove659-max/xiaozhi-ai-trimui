@@ -91,6 +91,47 @@ def package_folders(root=Path('/mnt/SDCARD')):
     return [root/d for d in PACKAGE_DIRS if (root/d).is_dir()]
 
 
+INSTALLED_FILE = '.da_cai.json'
+
+
+def _signature(p):
+    """Dấu nhận dạng một gói (tên + dung lượng + giờ sửa): chép gói mới trùng tên thì khác dấu nên không bị coi là đã cài."""
+    st=Path(p).stat()
+    return '%s|%d|%d'%(Path(p).name,st.st_size if Path(p).is_file() else 0,int(st.st_mtime))
+
+
+def installed_signatures(root=Path('/mnt/SDCARD')):
+    """Lịch sử gói đã cài: {dấu nhận dạng: giờ cài (epoch)}. Đọc được cả bản cũ (danh sách không có giờ)."""
+    try:data=json.loads((Path(root)/PACKAGE_DIRS[0]/INSTALLED_FILE).read_text(encoding='utf-8'))
+    except (OSError,ValueError,TypeError):return {}
+    if isinstance(data,list):return {s:0 for s in data if isinstance(s,str)}
+    return {k:v for k,v in data.items() if isinstance(k,str)} if isinstance(data,dict) else {}
+
+
+def mark_installed(paths,root=Path('/mnt/SDCARD')):
+    """Ghi vào lịch sử các gói đã cài (file ẩn trong thư mục chép game). Không xoá hay đổi gì của gói."""
+    import time
+    root=Path(root);sigs=installed_signatures(root)
+    for p in paths:
+        try:sigs[_signature(p)]=int(time.time())
+        except OSError:pass
+    try:
+        target=root/PACKAGE_DIRS[0]/INSTALLED_FILE;tmp=target.with_name(target.name+'.tmp')
+        tmp.write_text(json.dumps(sigs),encoding='utf-8');os.replace(tmp,target)
+    except OSError:pass
+
+
+def is_installed(path,sigs):
+    try:return _signature(path) in sigs
+    except OSError:return False
+
+
+def history(root=Path('/mnt/SDCARD')):
+    """Lịch sử cài đặt, mới nhất trước: [(tên gói, giờ cài, gói gốc còn trên thẻ?)]."""
+    root=Path(root);present={_signature(p) for p in list_packages(root)}
+    out=[(sig.split('|')[0],ts,sig in present) for sig,ts in installed_signatures(root).items()]
+    return sorted(out,key=lambda x:(-x[1],x[0].casefold()))
+
 def list_packages(root=Path('/mnt/SDCARD')):
     """Các gói người dùng đã chép (bỏ file hướng dẫn, file/thư mục ẩn)."""
     out=[]

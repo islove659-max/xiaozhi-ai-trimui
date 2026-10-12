@@ -77,9 +77,18 @@ async def main():
         check('port auto-installed first, not reported as missing game', bus.states[-1]['lines'][1] == 'Đã tự cài port Zeta Game trước.')
         check('no English PortMaster text on screen', not any('Purchase' in l for st in bus.states for l in st.get('lines', [])))
         check('both sources offered for removal', {p.name for p in ui.installed_sources} == {'Zeta Game (PortMaster).zip', 'Du lieu Steam'})
-        await ui.handle(308)   # X: xoá gói gốc
-        check('X removes installed sources', not (folder / 'Du lieu Steam').exists() and not (folder / 'Zeta Game (PortMaster).zip').exists())
-        # Tất cả: ROM tự nhận, gói lạ AI không chắc → bỏ qua và báo lý do
+        # Mở lại app (đối tượng mới): gói đã cài rời danh sách chính, hiện ở Lịch sử, gói gốc KHÔNG bị xoá
+        ui2 = tp.PackageUI(Bus(), root)
+        await ui2.open()
+        left = [p.name for p in ui2.entries]
+        check('installed packages leave the main list after reopening', 'Du lieu Steam' not in left and 'Zeta Game (PortMaster).zip' not in left and 'Mario.zip' in left)
+        check('source packages are NOT deleted', (folder / 'Du lieu Steam').exists() and (folder / 'Zeta Game (PortMaster).zip').exists())
+        await ui2.handle(313)   # R2: lịch sử cài đặt
+        hist = {r[1] for r in ui2.state['rows']}
+        check('history lists installed packages', ui2.state['status'] == 'Lịch sử cài đặt' and hist == {'Du lieu Steam', 'Zeta Game (PortMaster).zip'})
+        check('no delete option anywhere in history', all(k != 'X' for k, _ in ui2.state['controls']))
+        await ui2.handle(304)   # B: về danh sách
+        check('back from history returns to list', ui2.page == 'list')        # Tất cả: ROM tự nhận, gói lạ AI không chắc → bỏ qua và báo lý do
         await ui.open()
         await ui.auto_all()
         last = bus.states[-1]
