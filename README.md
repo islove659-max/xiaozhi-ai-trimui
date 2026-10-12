@@ -14,6 +14,7 @@ Trợ lý AI giọng nói tiếng Việt cho máy chơi game cầm tay **TrimUI 
     - Tra **Wikipedia tiếng Việt**.
     - **Tự học:** câu hỏi lặp lại ≥2 lần được lưu vào máy, mất mạng vẫn trả lời được.
     - **Gemini (tuỳ chọn):** trả lời câu hỏi vui, câu tưởng tượng (dùng key miễn phí của chính bạn).
+- **v1.1.0 — Cài gói game bằng AI (bấm R1):** chép game vào thư mục `CHEP_GAME_VAO_DAY` ở gốc thẻ (zip, 7z, thư mục, ROM lẻ, gói port PortMaster, dữ liệu game của port). Bấm **A** để AI tự nhận diện và cài gói đang chọn, **START** để cài tất cả. App tự tìm đúng thư mục `Roms/<HỆ>`, tự cài port vào `Data/ports` và menu Ports (kèm runtime khi có Wi-Fi), tự cài port trước khi chép dữ liệu game của nó; gói chưa nhận ra thì Gemini chọn trong các nơi cài hợp lệ. Không ghi đè, có hoàn tác, không gửi ROM/dữ liệu game cho AI.
 - **v1.0.3:** kiểm tra quyền thiết bị qua OTA và kết nối server trước khi mở giao diện. Mất kết nối sẽ khóa thao tác, bấm A để thử lại.
 - Mã kích hoạt hiện trực tiếp trên màn hình. Mỗi chủ máy liên kết với tài khoản Xiaozhi riêng; gói không có ID/token dùng chung.
 - Kiểm tra chứng chỉ HTTPS bằng bộ CA đi kèm.
@@ -55,6 +56,9 @@ Xem [`local_ai/HUONG_DAN_GEMINI.txt`](local_ai/HUONG_DAN_GEMINI.txt). Tóm tắt
 | START | Bật/tắt tự động | Sang Server, bấm A để hỏi |
 | Y | Đổi sang Cục bộ | Đổi sang Server |
 | MENU | Thoát | Thoát |
+| R1 / L1 | Sang tab Cài gói game / về Trợ lý AI | |
+
+Tab **Cài gói game**: A = AI tự cài gói, START = AI cài tất cả, X = xem trước (sau khi cài: xoá gói gốc), Y = hỏi AI, B = quay lại, giữ Lên/Xuống để cuộn.
 
 ## Ghi chú kỹ thuật (Brick Pro)
 

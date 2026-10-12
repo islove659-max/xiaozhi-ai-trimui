@@ -1,4 +1,4 @@
-XIAOZHI AI — TRIMUI HYBRID v1.0.3
+XIAOZHI AI — TRIMUI HYBRID v1.1.0
 TrimUI Brick Pro / Stock 1.1.1 (20260717) / TOS 4.0
 Tác giả: islove659@gmail.com
 Mã nguồn: https://github.com/islove659-max/xiaozhi-ai-trimui
@@ -24,9 +24,15 @@ Cập nhật giữ cấu hình ở /root/.local/share/py-xiaozhi/.
 
 ĐIỀU KHIỂN SAU KHI XÁC THỰC
 A: thu âm/gửi câu nói; B: ngắt; X: câu mẫu; START: tự động;
-Y: đổi Server ↔ Cục bộ & Internet; MENU: thoát.
+Y: đổi Server ↔ Cục bộ & Internet; R1: tab Cài gói game; MENU: thoát.
 Cục bộ chỉ dùng sau khi app đã xác thực được thiết bị.
 Gemini tùy chọn: xem local_ai/HUONG_DAN_GEMINI.txt, giữ key riêng tư.
+
+CÀI GAME BẰNG AI (MỚI)
+1. Cắm thẻ vào máy tính, mở thư mục CHEP_GAME_VAO_DAY ở ngoài cùng thẻ.
+2. Chép game vào: .zip, .7z, thư mục game, file ROM, gói port PortMaster.
+3. Mở Xiaozhi AI, bấm R1. A: AI cài gói đang chọn; START: AI cài tất cả.
+4. Cài xong bấm X để xoá gói gốc. Xem thêm CHEP_GAME_VAO_DAY/HUONG_DAN.txt.
 
 YÊU CẦU
 Python 3.11 ARM64 của thẻ (System/bin/python3), Wi-Fi, tài khoản Xiaozhi riêng.

@@ -3,6 +3,7 @@ local_ai/gemini_key.txt
 local_ai/knowledge/user_stats.json
 local_ai/knowledge/documents/kien_thuc_da_hoc.md
 local_ai/audio_cache/
+local_ai/huong_dan_port_vi.json
 
 # Tài liệu nội bộ (chỉ lưu trên PC và thẻ nhớ)
 TIEN_TRINH*.md
