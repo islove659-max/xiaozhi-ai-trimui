@@ -1,4 +1,4 @@
-# Xiaozhi AI — Bản TrimUI Hybrid
+﻿# Xiaozhi AI — Bản TrimUI Hybrid
 
 Trợ lý AI giọng nói tiếng Việt cho máy chơi game cầm tay **TrimUI Brick Pro** (Stock OS / TOS 4.0), chạy thẳng trên framebuffer, điều khiển bằng nút máy.
 
@@ -58,7 +58,7 @@ Xem [`local_ai/HUONG_DAN_GEMINI.txt`](local_ai/HUONG_DAN_GEMINI.txt). Tóm tắt
 | MENU | Thoát | Thoát |
 | R1 / L1 | Sang tab Cài gói game / về Trợ lý AI | |
 
-Tab **Cài gói game**: A = AI tự cài gói, START = AI cài tất cả, X = xem trước (sau khi cài: xoá gói gốc), Y = hỏi AI, B = quay lại, giữ Lên/Xuống để cuộn.
+Tab **Cài gói game**: A = AI tự cài gói, START = AI cài tất cả, X = xem trước, Y = hỏi AI, R1 = Lịch sử cài đặt (gói đã cài nằm ở đó, không bị xoá), B = quay lại, giữ Lên/Xuống để cuộn.
 
 ## Ghi chú kỹ thuật (Brick Pro)
 
